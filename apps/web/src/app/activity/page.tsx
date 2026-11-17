@@ -3,7 +3,7 @@ import { useState } from "react";
 import { formatUsd } from "@agent-firewall/policy";
 import { AGENT_ID, api, txUrl, type ActivityItem } from "@/lib/api";
 import { usePoll } from "@/lib/hooks";
-import { Callout, ErrorState, OutcomeBadge, VerifyLink, shortAddr, shortTime } from "@/components";
+import { ErrorState, OutcomeBadge, VerifyLink, shortAddr, shortTime } from "@/components";
 
 export default function Activity() {
   const [filter, setFilter] = useState<"all" | "blocked">("all");
@@ -48,14 +48,6 @@ export default function Activity() {
           </table>
         </div>
       )}
-      <section className="two" aria-label="How to read this">
-        <Callout title="Two payments at once, one dollar left">
-          If two requests arrive together and only one fits, we reserve the money for the first and block the second. They can&apos;t both slip through.
-        </Callout>
-        <Callout tone="attention" title="A seller told the agent to send $3">
-          Text hidden in a seller&apos;s reply can try to hijack your agent. We never trust the agent&apos;s reasons. The payment is checked against your rules, held, and you decide.
-        </Callout>
-      </section>
     </>
   );
 }

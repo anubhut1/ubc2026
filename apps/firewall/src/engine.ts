@@ -148,10 +148,10 @@ export function markSettled(db: DB, requestId: string, txHash?: string): boolean
  * If it DID sign, the seller holds a valid authorization (up to ~9 days) and could still settle it,
  * so it stays counted as "unconfirmed" until that authorization expires (fail closed: never overspend).
  */
-export function markFailed(db: DB, requestId: string): boolean {
+export function markFailed(db: DB, requestId: string, failureReason?: string): boolean {
   const r = db
-    .prepare("UPDATE requests SET status = CASE WHEN signed_ms IS NULL THEN 'released' ELSE 'unconfirmed' END WHERE request_id=? AND status='reserved'")
-    .run(requestId);
+    .prepare("UPDATE requests SET status = CASE WHEN signed_ms IS NULL THEN 'released' ELSE 'unconfirmed' END, failure_reason = COALESCE(?, failure_reason) WHERE request_id=? AND status='reserved'")
+    .run(failureReason ?? null, requestId);
   return r.changes > 0;
 }
 

@@ -33,9 +33,13 @@ const post = async (path: string, body: unknown) => {
 };
 const toJson = (v: unknown) => JSON.parse(JSON.stringify(v, (_, x) => (typeof x === "bigint" ? x.toString() : x)));
 
+interface PayerInfo { address: Address | null; mode: "local-key" | "circle-agent-wallet"; network: string }
+let payerInfo: PayerInfo | null = null;
+const payer = async () => (payerInfo ??= (await (await fetch(`${FW}/v1/signer`)).json()) as PayerInfo);
+
 /** A BatchEvmSigner whose signTypedData is a call to the firewall. The key never leaves the firewall. */
 async function firewallScheme(requestId: string) {
-  const { address } = (await (await fetch(`${FW}/v1/signer`)).json()) as { address: Address | null };
+  const { address } = await payer();
   if (!address) return null;
   return new BatchEvmScheme({
     address,
@@ -55,7 +59,8 @@ export async function buy(path: string, opts: { recipient: string; category: Cat
   const first = await fetch(url);
   if (first.status !== 402) return { outcome: "error", reason: `expected 402, got ${first.status}` };
   const required = JSON.parse(Buffer.from(first.headers.get("PAYMENT-REQUIRED") ?? "", "base64").toString("utf8"));
-  const option = (required.accepts ?? []).find((o: any) => o.network === "eip155:5042002" && o.extra?.name === "GatewayWalletBatched");
+  const { mode, network } = await payer();
+  const option = (required.accepts ?? []).find((o: any) => o.network === network && o.extra?.name === "GatewayWalletBatched");
   if (!option) return { outcome: "error", reason: "seller has no Arc Gateway option" };
 
   const requestId = `req_${randomUUID()}`;
@@ -64,6 +69,17 @@ export async function buy(path: string, opts: { recipient: string; category: Cat
     amountMicro: Number(option.amount), category: opts.category, purpose: opts.purpose, sourceContext: opts.sourceContext,
   });
   if (decision.outcome !== "allow") return { outcome: decision.outcome, reason: decision.reason };
+
+  if (mode === "circle-agent-wallet") {
+    // Mainnet: the firewall pays from the Circle Agent Wallet and hands back the response body.
+    // On failure the firewall has already recorded the outcome itself.
+    try {
+      const { body } = await post(`/v1/payments/${requestId}/pay`, { url });
+      return { outcome: "allow", reason: decision.reason, data: JSON.parse(body) };
+    } catch (e) {
+      return { outcome: "error", reason: (e as Error).message };
+    }
+  }
 
   try {
     let header: string;
@@ -135,8 +151,9 @@ async function attack() {
   for (const f of d.flags ?? []) console.log(`    flag: ${f}`);
   // It then tries to get the money signed anyway: refused, because only allowed payments get signatures.
   try {
-    await post(`/v1/payments/${requestId}/sign`, { typedData: {} });
-    console.log("  !!! signer signed a held payment (this should never happen)");
+    if ((await payer()).mode === "circle-agent-wallet") await post(`/v1/payments/${requestId}/pay`, { url: `${SELLERS}/sportsfeed/injuries` });
+    else await post(`/v1/payments/${requestId}/sign`, { typedData: {} });
+    console.log("  !!! firewall paid a payment it didn't allow (this should never happen)");
   } catch (e) {
     console.log(`  agent tries to get it signed directly → refused: ${(e as Error).message}`);
   }

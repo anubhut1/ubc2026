@@ -102,6 +102,7 @@ export function openDb(path: string): DB {
   db.exec("PRAGMA journal_mode = WAL; PRAGMA busy_timeout = 5000; PRAGMA foreign_keys = ON;");
   db.exec(SCHEMA);
   try { db.exec("ALTER TABLE holds ADD COLUMN hold_error TEXT"); } catch { /* already there */ }
+  try { db.exec("ALTER TABLE requests ADD COLUMN failure_reason TEXT"); } catch { /* already there */ }
   return db;
 }
 

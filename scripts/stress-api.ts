@@ -46,8 +46,11 @@ check("Idempotency: same requestId × 10", dupSpent === 300_000 && sameOutcome, 
 
 // 4. Signing a blocked request is refused
 const blockedId = ids[decisions.findIndex((d) => d.body.outcome === "block")]!;
-const sign = await post(`/v1/payments/${blockedId}/sign`, { typedData: {} });
-check("Signer refuses a blocked request", sign.status >= 400, `HTTP ${sign.status}: ${sign.body.error}`);
+const { mode } = await get("/v1/signer");
+const sign = mode === "circle-agent-wallet"
+  ? await post(`/v1/payments/${blockedId}/pay`, { url: `${process.env.SELLERS_URL ?? "http://localhost:4200"}/oddsapi/odds/bulk` })
+  : await post(`/v1/payments/${blockedId}/sign`, { typedData: {} });
+check(`Payer (${mode}) refuses a blocked request`, sign.status >= 400, `HTTP ${sign.status}: ${sign.body.error}`);
 
 console.table(results);
 process.exit(results.every((r) => r.pass) ? 0 : 1);

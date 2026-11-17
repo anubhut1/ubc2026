@@ -103,7 +103,7 @@ export default function Home() {
 
         <div className="card chart-card">
           <div className="card-top">
-            <div><h2>Payments by hour</h2><span className="sub">Every request your agent made, last 8 hours</span></div>
+            <h2>Payments by hour</h2>
             <div className="legend"><span><i className="sw" />Paid</span><span><i className="sw stopped" />Stopped</span></div>
           </div>
           <HourChart items={items} now={now} />
@@ -121,7 +121,7 @@ export default function Home() {
             </div>
           </div>
           <div className={`card ${pending.length ? "attention" : ""}`}>
-            <div className="card-top"><div><h2>Waiting for you</h2><span className="sub">Held payments need your passkey</span></div></div>
+            <div className="card-top"><h2>Waiting for you</h2></div>
             {pending.length === 0
               ? <p className="lockline"><Icon name="check" size={16} />Nothing is waiting.</p>
               : <p className="lockline" style={{ color: "var(--orange)" }}><Icon name="clock" size={16} />{pending.length} held · {fmtLeft(new Date(pending[0]!.expiresAt).getTime() - now)}</p>}
@@ -130,7 +130,7 @@ export default function Home() {
 
         <div className="panel flush span2">
           <div className="panel-bar">
-            <div><h2>Payment history</h2><span className="muted small">Recent payments and what the firewall decided</span></div>
+            <h2>Payment history</h2>
             <Link className="round-link" href="/activity" aria-label="View all activity"><Icon name="arrow" size={16} /></Link>
           </div>
           {recent.length === 0 ? (
@@ -147,7 +147,7 @@ export default function Home() {
 
         <div className="card">
           <div className="card-top">
-            <div><h2>Your rules</h2><span className="sub">Enforced outside the agent</span></div>
+            <h2>Your rules</h2>
             <Link className="round-link" href="/rules" aria-label="Change rules"><Icon name="edit" size={16} /></Link>
           </div>
           {rules.length === 0 ? (

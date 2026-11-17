@@ -1,6 +1,61 @@
 # HANDOFF: Agent Firewall (UBC Hackathon 2026)
 
 > Read this whole file before writing code. It is the source of truth for scope, architecture and build order.
+> **Start with §0 (build status).** It records what is built, what changed from the original plan and why, and what's next. Keep §0 updated as you work.
+
+---
+
+## 0. Build status (updated 2026-11-16)
+
+### Verify the build
+```bash
+npm install
+npm test                 # 17 policy + 14 firewall tests (incl. multi-process race + signer)
+npm run test:contracts   # 17 forge tests
+npm run demo:local       # full demo (normal / race / attack) with throwaway keys and mock seller settlement
+```
+For how to run, the architecture and the honest safety limits, see `README.md`. API contract: `docs/API.md`. Verified Circle/Arc/x402 facts with sources: `docs/RESEARCH.md`. **Read RESEARCH.md before touching any Circle integration.**
+
+### Done
+| Area | Where | Status |
+|---|---|---|
+| Policy engine, all 9 rule kinds, canonical hash, 6/18-decimal normalization | `packages/policy` | ✅ tested |
+| Atomic evaluate+reserve (`BEGIN IMMEDIATE`), idempotent requestId, deny-by-default with no policy | `apps/firewall/src/engine.ts` | ✅ race tested across 6 OS processes |
+| English→rules compiler (Claude `claude-opus-5-5` structured output; offline regex fallback), ambiguity flags, dry run, confirm-gated save | `apps/firewall/src/compiler.ts`, `dryrun.ts` | ✅ (LLM path untested without key) |
+| **Firewall is the only x402 signer** (see "Plan changes") | `apps/firewall/src/signer.ts` | ✅ tested with the real `BatchEvmScheme` |
+| Holds: SMS (Twilio REST + signature check), NO cancels, YES refused, PAUSE, 15-min expiry sweeper | `approvals.ts`, `sms.ts`, `server.ts` | ✅ smoke-tested in SMS dry-run mode |
+| Owner passkey (WebAuthn) enrollment + approve | `approvals.ts`, `apps/web/src/passkey.tsx`, `/a/[token]` | ⚠️ code done, **never tried on a real device** |
+| Arc adapter: commitPolicy, batched logDecisions, vault hold/deny/approve/refundExpired | `apps/firewall/src/arc.ts` | ⚠️ **never run against testnet** |
+| Contracts `PolicyRegistry`, `ApprovalVault` + deploy script | `contracts/` | ✅ tested locally, ❌ not deployed |
+| Web: Home, Rules, Activity, approve page | `apps/web` | ⚠️ builds + typechecks; **not yet clicked through against a live backend** |
+| Demo sellers (Circle Gateway middleware or `MOCK_PAYMENTS=1`), one compromised endpoint | `apps/sellers` | ✅ mock mode; ❌ real Gateway untested |
+| Demo agent (no keys; normal / race / attack phases) | `apps/agent` | ✅ mock mode |
+| README with Safety limits | `README.md` | ✅ |
+
+### Plan changes (and why)
+1. **Circle Agent Wallet caps/allowlists are mainnet-only** (RESEARCH Q2), so the §4 "outer wall" cannot be demoed on testnet. Instead, **the firewall holds the buyer key and the agent has none.** The agent asks `/v1/payments/:id/sign`, and the firewall signs the Gateway `TransferWithAuthorization` only if payee, amount, chain and verifying contract match a reservation it already allowed (one signature per request). Do NOT re-add claims that "Circle's allowlist rejects it" to the demo or README.
+2. **Injection amount is $3, not $50.** $50 exceeds the $10 task budget (block beats hold) and the $5 daily cap. $3 is over the $1 threshold and to an unknown address, so it is **held**, which is what the demo needs.
+3. **Race runs on its own agent (`race-agent`) with a $1.00 budget**, so it doesn't exhaust the main task budget before the attack scene.
+4. **Allowlist violations default to HOLD, not block** (the SMS copy in §8 is for unknown addresses). Override per rule with `onViolation: "block"`. Budgets and limits block. Block beats hold.
+5. **Owner approval:** WebAuthn gates a service-held owner key that calls `ApprovalVault.approve`. This is a disclosed hackathon shortcut; Circle Modular Wallets (passkey-native) is the proper fix (RESEARCH Q8).
+6. Vault uses `hold()` with `transferFrom` from a treasury, called by the service (RESEARCH "Implications" §4).
+7. SQLite via built-in `node:sqlite`, not better-sqlite3 (no native build).
+8. `@circle-fin/x402-batching` pinned to **2.0.4** (matches `circlefin/arc-nanopayments`; npm latest is 4.x with a different shape).
+
+### Next up (in order)
+1. **Testnet bring-up:** fund keys (faucet.circle.com), deploy contracts, set env, treasury `approve(vault)`, `npm run deposit -w @agent-firewall/firewall -- 2`, run the agent with `MOCK_PAYMENTS=0`. Watch whether a real nanopayment settles through the firewall signature.
+2. Click through the web app against a live firewall (`npm run dev:firewall` + `dev:web`) and fix any API mismatches.
+3. Twilio: verify team phones, set `FIREWALL_PUBLIC_URL` (e.g. via a tunnel) as the inbound webhook, and test a real NO reply.
+4. Passkey on a real phone: WebAuthn needs HTTPS or localhost; the RP ID must match the approve-page host.
+5. Record a backup video of `npm run demo:local` + web UI.
+
+### Known gaps / gotchas
+- On a fresh DB, the agent is blocked until rules are saved (deny by default). Save rules on `/rules` first.
+- If `vaultApprove` fails after a passkey OK, the DB says "approved" but funds stay in the vault until `refundExpired`. Surface this in the UI if it shows up in testing.
+- `commitPolicy` is `onlyOwner`. For the demo, deploy with `OWNER_ADDRESS` = the service address, or commits will revert.
+- Disk on the original dev machine is nearly full; `apps/web/.next` is large, so delete it after builds.
+
+---
 > **Never guess Circle / Arc / x402 API signatures.** Check the official docs and the starter repo (`circlefin/arc-nanopayments`) first. If something is unclear, stop and leave a `TODO(verify)` note instead of inventing an API.
 
 ---

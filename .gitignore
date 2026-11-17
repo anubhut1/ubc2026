@@ -11,3 +11,5 @@ contracts/out/
 contracts/cache/
 contracts/broadcast/
 .DS_Store
+.env.*
+!.env.*.example

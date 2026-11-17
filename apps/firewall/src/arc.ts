@@ -41,8 +41,31 @@ export const arcStatus = () => ({
 
 const MIN_FEE = parseGwei("20"); // Arc testnet rejects low fees (docs/RESEARCH.md)
 
+// One queue per signing account: two txs from the same key at once collide on the nonce
+// ("replacement transaction underpriced"; seen live when a Gateway top-up overlapped a vault hold).
+const queues = new Map<string, Promise<unknown>>();
+export function serialized<T>(account: string, fn: () => Promise<T>): Promise<T> {
+  const prev = queues.get(account) ?? Promise.resolve();
+  const next = prev.catch(() => {}).then(fn);
+  queues.set(account, next.catch(() => {}));
+  return next;
+}
+const TRANSIENT = /replacement transaction underpriced|nonce too low|nonce has already been used|already known/i;
+
 async function send(wallet: typeof service, address: Hex, abi: any, functionName: string, args: unknown[]): Promise<Hex> {
   if (!wallet) throw new Error("wallet not configured");
+  return serialized(wallet.account!.address, async () => {
+    try {
+      return await sendNow(wallet, address, abi, functionName, args);
+    } catch (e) {
+      if (!TRANSIENT.test(String((e as Error)?.message))) throw e;
+      await new Promise((r) => setTimeout(r, 1500)); // let the other tx land, then retry once with a fresh nonce
+      return sendNow(wallet, address, abi, functionName, args);
+    }
+  });
+}
+
+async function sendNow(wallet: NonNullable<typeof service>, address: Hex, abi: any, functionName: string, args: unknown[]): Promise<Hex> {
   let fees: { maxFeePerGas: bigint; maxPriorityFeePerGas: bigint };
   try {
     const est = await publicClient.estimateFeesPerGas();
@@ -100,6 +123,14 @@ export async function vaultFunding(): Promise<{ treasury: Hex; allowanceMicro: n
   ]);
   return { treasury, allowanceMicro: Number(allowance), balanceMicro: Number(balance) };
 }
+
+/** USDC token address (read from the vault so it can't drift from what the vault uses). */
+export async function usdcAddress(): Promise<Hex | null> {
+  if (!config.arc.vaultAddress) return (process.env.USDC_ADDRESS as Hex | undefined) ?? null;
+  return publicClient.readContract({ address: config.arc.vaultAddress, abi: vaultReadAbi, functionName: "usdc" });
+}
+
+export { publicClient as arcPublicClient };
 
 export async function vaultHold(requestId: string, recipient: string, amountMicro: number, expiresAt: Date): Promise<Hex | null> {
   const to = resolveRecipient(recipient);

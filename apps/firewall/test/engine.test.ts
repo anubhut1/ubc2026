@@ -6,7 +6,7 @@ import { promisify } from "node:util";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { policyHash, usdToMicro, type Rule } from "@agent-firewall/policy";
 import { openDb, type DB } from "../src/db";
-import { evaluateAndReserve, markFailed, savePolicy, spendState } from "../src/engine";
+import { evaluateAndReserve, markFailed, releaseExpiredUnconfirmed, savePolicy, spendState } from "../src/engine";
 
 const run = promisify(execFile);
 let dir: string;
@@ -50,6 +50,19 @@ describe("engine", () => {
     evaluateAndReserve(db, req("a", 800_000));
     expect(evaluateAndReserve(db, req("b", 800_000)).decision.outcome).toBe("block");
     expect(markFailed(db, "a")).toBe(true);
+    expect(evaluateAndReserve(db, req("c", 800_000)).decision.outcome).toBe("allow");
+  });
+
+  it("keeps counting a payment that failed AFTER signing, until the authorization expires", () => {
+    savePolicy(db, "race-agent", rules(usdToMicro(1)), policyHash(rules(usdToMicro(1))));
+    evaluateAndReserve(db, req("a", 800_000));
+    db.prepare("UPDATE requests SET signed_ms=? WHERE request_id='a'").run(Date.now());
+    expect(markFailed(db, "a")).toBe(true);
+    // The seller could still settle the signed authorization, so the budget is NOT returned.
+    expect(evaluateAndReserve(db, req("b", 800_000)).decision.outcome).toBe("block");
+    expect(spendState(db, "race-agent", "race-task", new Date()).taskSpentMicro).toBe(800_000);
+    // Once the authorization can no longer be settled, it is released.
+    expect(releaseExpiredUnconfirmed(db, Date.now() + 10 * 24 * 3600_000)).toBe(1);
     expect(evaluateAndReserve(db, req("c", 800_000)).decision.outcome).toBe("allow");
   });
 

@@ -12,7 +12,15 @@ import { immediate, type DB } from "./db";
 import { resolveRecipient } from "./arc";
 
 const buyerKey = process.env.BUYER_PRIVATE_KEY as Hex | undefined;
-const buyer = buyerKey ? privateKeyToAccount(buyerKey) : null;
+const buyer = (() => {
+  if (!buyerKey) return null;
+  try {
+    return privateKeyToAccount(buyerKey);
+  } catch {
+    console.error("BUYER_PRIVATE_KEY is invalid; signing disabled.");
+    return null;
+  }
+})();
 const GATEWAY_WALLETS = (process.env.GATEWAY_WALLET_ADDRESSES ?? "0x0077777d7EBA4688BDeF3E311b846F25870A19B9")
   .split(",")
   .filter(Boolean)

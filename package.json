@@ -2,14 +2,22 @@
   "name": "agent-firewall",
   "private": true,
   "type": "module",
-  "workspaces": ["packages/*", "apps/*"],
+  "workspaces": [
+    "packages/*",
+    "apps/*"
+  ],
   "scripts": {
     "test": "npm run test --workspaces --if-present",
     "typecheck": "npm run typecheck --workspaces --if-present",
     "dev:firewall": "npm run dev -w @agent-firewall/firewall",
     "dev:web": "npm run dev -w @agent-firewall/web",
     "dev:sellers": "npm run dev -w @agent-firewall/sellers",
-    "test:contracts": "cd contracts && forge test"
+    "test:contracts": "cd contracts && forge test",
+    "demo:local": "scripts/demo-local.sh",
+    "smoke": "scripts/smoke.sh",
+    "dev:agent": "npm start -w @agent-firewall/agent --"
   },
-  "engines": { "node": ">=22.13" }
+  "engines": {
+    "node": ">=22.13"
+  }
 }

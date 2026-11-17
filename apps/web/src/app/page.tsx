@@ -105,7 +105,7 @@ export default function Home() {
           ) : (
             <div style={{ overflowX: "auto" }}>
               <table className="tx">
-                <thead><tr><th>Time</th><th>Paid to</th><th>Status</th><th className="r">Amount</th><th className="r hide-sm">Arc tx</th></tr></thead>
+                <thead><tr><th>Time</th><th>To</th><th>Status</th><th className="r">Amount</th><th className="r hide-sm">Arc tx</th></tr></thead>
                 <tbody>{recent.slice(0, 8).map((a) => <TxRow key={a.requestId} a={a} />)}</tbody>
               </table>
             </div>
@@ -120,7 +120,7 @@ export default function Home() {
             <ul className="pol">{rules.map((r) => <li key={r.ruleId}>{r.sentence}</li>)}</ul>
           )}
           <p className="muted small">
-            {policy ? <>Locked on Arc · <span className="mono">{policy.hash.slice(0, 10)}…{policy.hash.slice(-6)}</span> </> : "Rules not locked on Arc yet "}
+            {policy ? "Locked on Arc · " : "Not locked on Arc yet "}
             <VerifyLink href={policyUrl}>verify</VerifyLink>
           </p>
         </div>
@@ -131,17 +131,20 @@ export default function Home() {
 
 function TxRow({ a }: { a: ActivityItem }) {
   const struck = ["blocked", "released", "denied", "expired"].includes(a.status);
-  const memo = struck || a.status === "held" ? a.reason : a.purpose?.trim() || a.category;
+  const purpose = a.purpose?.trim() || a.category;
+  // The address is already in the row; drop it from the reason ("0x7a3f…c91e isn't on…" → "Isn't on…").
+  const why = a.reason.replace(/^0x[0-9a-f]+…[0-9a-f]+\s+(\w)/i, (_, c: string) => c.toUpperCase());
+  const memo = struck || a.status === "held" ? `${purpose} · ${why}` : purpose;
   const url = txUrl(a.arcTx, a.arcTxUrl);
   return (
     <tr>
-      <td className="muted mono nowrap">{shortTime(a.at)}</td>
-      <td>
-        <span className={/^0x/i.test(a.recipient) ? "mono" : ""}>{shortAddr(a.recipient)}</span>
+      <td className="t-time muted mono nowrap">{shortTime(a.at)}</td>
+      <td className="t-to">
+        <span className={/^0x/i.test(a.recipient) ? "mono" : ""} title={a.recipient}>{shortAddr(a.recipient)}</span>
         <span className="memo">{memo}</span>
       </td>
-      <td><OutcomeBadge outcome={a.outcome} status={a.status} /></td>
-      <td className={`r mono ${struck ? "strike" : ""}`}>{formatUsd(a.amountMicro)}</td>
+      <td className="t-status"><OutcomeBadge outcome={a.outcome} status={a.status} /></td>
+      <td className={`t-amt r mono ${struck ? "strike" : ""}`}>{formatUsd(a.amountMicro)}</td>
       <td className="r hide-sm">{url ? <a className="mono" href={url} target="_blank" rel="noreferrer">{(a.arcTx ?? "").slice(0, 8)}…</a> : <span className="muted">pending</span>}</td>
     </tr>
   );

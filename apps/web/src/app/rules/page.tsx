@@ -120,8 +120,7 @@ export default function RulesPage() {
       <h1>Your rules</h1>
 
       <section className="panel" aria-labelledby="s1">
-        <span className="step">Step 1</span>
-        <h2 id="s1">Tell us</h2>
+        <h2 id="s1"><span className="step-n" aria-hidden="true">1</span>Tell us</h2>
         <div className="field">
           <label htmlFor="rules-text">Describe what your agent may spend, in your own words.</label>
           <textarea id="rules-text" value={text} onChange={(e) => setText(e.target.value)} />
@@ -136,8 +135,7 @@ export default function RulesPage() {
       {rules && (
         <>
           <section className="panel" aria-labelledby="s2">
-            <span className="step">Step 2</span>
-            <h2 id="s2">Here&apos;s what we understood</h2>
+            <h2 id="s2"><span className="step-n" aria-hidden="true">2</span>Here&apos;s what we understood</h2>
             {ambiguities.map((a) => (
               <div key={a.phrase} className="callout attention" role="note">
                 <strong>Not sure about &ldquo;{a.phrase}&rdquo;</strong>
@@ -172,8 +170,7 @@ export default function RulesPage() {
           </section>
 
           <section className="panel" aria-labelledby="s3">
-            <span className="step">Step 3</span>
-            <h2 id="s3">Quick test</h2>
+            <h2 id="s3"><span className="step-n" aria-hidden="true">3</span>Quick test</h2>
             <p className="muted">Sample payments run against these rules. Nothing is spent.</p>
             {!tests ? <p className="muted" role="status">Running…</p> : (
               <ul className="tests">

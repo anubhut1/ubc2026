@@ -35,9 +35,9 @@ export function Shell({ children }: { children: ReactNode }) {
         {summary && (
           <div className="side-box">
             <span className="side-label">Agent</span>
-            <span className="status"><span className={`dot ${paused ? "paused" : ""}`} aria-hidden="true" />{summary.agent.name}</span>
+            <span className="status"><span className={`dot ${paused ? "paused" : ""}`} aria-hidden="true" /><span className="cap">{summary.agent.name}</span></span>
             <div className="kv"><span>Task</span><span className="mono">{summary.task.id}</span></div>
-            <div className="kv"><span>Policy</span><span className="mono">{summary.policy ? `${summary.policy.hash.slice(0, 8)}…` : "none"}</span></div>
+            <div className="kv"><span>Rules</span><span>{summary.policy ? "Locked on Arc" : "Not saved"}</span></div>
           </div>
         )}
         <div className="side-foot">

@@ -35,12 +35,12 @@ export default function Activity() {
               {items.length === 0 && <tr><td colSpan={7} className="muted">Nothing to show.</td></tr>}
               {items.map((a) => (
                 <tr key={a.requestId}>
-                  <td className="mono">{shortTime(a.at)}</td>
+                  <td className="mono nowrap">{shortTime(a.at)}</td>
                   <td><OutcomeBadge outcome={a.outcome} status={a.status} /></td>
-                  <td className="mono">{formatUsd(a.amountMicro)}</td>
-                  <td className="mono" title={a.recipient}>{shortAddr(a.recipient)}</td>
-                  <td>{a.ruleId ?? "—"}</td>
-                  <td>{a.reason}</td>
+                  <td className="mono nowrap">{formatUsd(a.amountMicro)}</td>
+                  <td className="mono nowrap" title={a.recipient}>{shortAddr(a.recipient)}</td>
+                  <td className="nowrap">{a.ruleId ? humanize(a.ruleId) : "—"}</td>
+                  <td className="detail">{a.reason}</td>
                   <td>{a.arcTx || a.arcTxUrl ? <span className="table-verify"><VerifyLink href={txUrl(a.arcTx, a.arcTxUrl)}>verify</VerifyLink></span> : "—"}</td>
                 </tr>
               ))}
@@ -58,4 +58,9 @@ export default function Activity() {
       </section>
     </>
   );
+}
+
+function humanize(id: string) {
+  const s = id.replace(/[-_]+/g, " ");
+  return s.charAt(0).toUpperCase() + s.slice(1);
 }

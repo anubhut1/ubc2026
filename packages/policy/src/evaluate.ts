@@ -110,7 +110,8 @@ export function evaluate(
 
 function finish(req: PaymentRequest, now: Date, violations: Violation[], triggerPause: boolean, flags: string[]): Decision {
   const block = violations.find((x) => x.severity === "block");
-  const hold = violations.find((x) => x.severity === "hold");
+  // Prefer the allowlist reason for holds: "unknown recipient" tells the human more than "over $1".
+  const hold = violations.find((x) => x.severity === "hold" && x.kind === "allowlist") ?? violations.find((x) => x.severity === "hold");
   const decider = block ?? hold;
   return {
     requestId: req.requestId,

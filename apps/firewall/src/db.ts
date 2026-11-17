@@ -107,6 +107,6 @@ export function immediate<T>(db: DB, fn: () => T): T {
   }
 }
 
-export function ensureAgent(db: DB, id: string, name = id) {
+export function ensureAgent(db: DB, id: string, name = id.replace(/-/g, " ")) {
   db.prepare("INSERT OR IGNORE INTO agents (id, name, created_at) VALUES (?, ?, ?)").run(id, name, new Date().toISOString());
 }

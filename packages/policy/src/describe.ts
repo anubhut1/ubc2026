@@ -7,10 +7,10 @@ const hour = (n: number) => `${((n + 11) % 12) + 1}${n < 12 ? "am" : "pm"}`;
 /** Who actually enforces a rule. Shown on the Rules page so users know what's hard vs. soft. */
 export function enforcedBy(rule: Rule): string {
   switch (rule.kind) {
-    case "periodBudget":
-      return rule.period === "day" ? "Circle wallet cap + Agent Firewall" : "Agent Firewall";
+    // Circle Agent Wallet spending policies are mainnet-only (docs/RESEARCH.md), so on Arc testnet
+    // every rule is enforced by the firewall (the only signer). Don't claim an outer wall we can't demo.
     case "allowlist":
-      return "Circle wallet allowlist + Agent Firewall";
+      return "Agent Firewall + Arc ApprovalVault";
     case "approvalThreshold":
       return "Agent Firewall + Arc ApprovalVault";
     default:

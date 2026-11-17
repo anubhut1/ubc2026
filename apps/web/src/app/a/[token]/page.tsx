@@ -4,7 +4,7 @@ import { startAuthentication } from "@simplewebauthn/browser";
 import { formatUsd } from "@agent-firewall/policy";
 import { ApiError, api, txUrl, type HeldPayment } from "@/lib/api";
 import { useNow } from "@/lib/hooks";
-import { ErrorState, Icon, Money, VerifyLink, shortAddr } from "@/components";
+import { ErrorState, VerifyLink, shortAddr } from "@/components";
 
 type Held = HeldPayment & { agentName?: string };
 
@@ -57,13 +57,13 @@ export default function ApprovePage({ params }: { params: Promise<{ token: strin
 
   if (!held) {
     return (
-      <div className="approve-wrap"><div className="approve">
+      <div className="approve">
         {error
           ? error.status === 404
             ? <div className="callout attention" role="alert"><strong>This link isn&apos;t valid anymore.</strong><p>It may have been used or expired. Nothing is waiting on you here.</p></div>
             : <ErrorState error={error} onRetry={load} />
           : <p className="muted" role="status">Loading…</p>}
-      </div></div>
+      </div>
     );
   }
 
@@ -77,15 +77,12 @@ export default function ApprovePage({ params }: { params: Promise<{ token: strin
   };
 
   return (
-    <div className="approve-wrap"><div className="approve">
-      <div className="brand" style={{ padding: 0 }}><span className="brand-mark" aria-hidden="true"><Icon name="shield" size={16} /></span>Agent Firewall</div>
-      <div className="card">
-      <p className="muted">{held.agentName ? held.agentName.charAt(0).toUpperCase() + held.agentName.slice(1) : "Your agent"} wants to pay</p>
-      <Money micro={held.amountMicro} size="xl" className="amount" />
-      <dl className="kv">
-        <dt>To</dt><dd className="to" title={held.recipient}>{held.recipient.length > 40 ? shortAddr(held.recipient) : held.recipient}</dd>
-        <dt>Held in</dt><dd>Arc vault <VerifyLink href={txUrl(held.holdTx, held.holdTxUrl)}>proof</VerifyLink></dd>
-      </dl>
+    <div className="approve">
+      <p className="muted">{held.agentName ?? "Your agent"} wants to pay</p>
+      <div className="amount">{formatUsd(held.amountMicro)}</div>
+      <div>
+        <span className="muted">To </span>
+        <span className="to" title={held.recipient}>{held.recipient.length > 40 ? shortAddr(held.recipient) : held.recipient}</span>
       </div>
 
       <section className="callout attention" aria-labelledby="why">
@@ -102,10 +99,10 @@ export default function ApprovePage({ params }: { params: Promise<{ token: strin
             If you do nothing, the money is refunded in <span className="countdown" role="timer">{fmtCountdown(remaining)}</span>.
           </p>
           <div className="actions">
-            <button className="btn ink block lg" onClick={deny} disabled={busy !== null}>
+            <button className="btn attention block" onClick={deny} disabled={busy !== null}>
               {busy === "deny" ? "Cancelling…" : "Cancel payment"}
             </button>
-            <button className="btn secondary block lg" onClick={approve} disabled={busy !== null}>
+            <button className="btn secondary block" onClick={approve} disabled={busy !== null}>
               {busy === "approve" ? "Waiting for passkey…" : "Approve with passkey"}
             </button>
           </div>
@@ -119,6 +116,7 @@ export default function ApprovePage({ params }: { params: Promise<{ token: strin
       )}
       {msg && <p role="alert" style={{ color: "var(--orange)" }}>{msg}</p>}
       {error && <ErrorState error={error} onRetry={load} />}
-    </div></div>
+      <VerifyLink href={txUrl(held.holdTx, held.holdTxUrl)}>verify the hold on Arc</VerifyLink>
+    </div>
   );
 }

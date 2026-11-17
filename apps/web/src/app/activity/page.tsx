@@ -1,8 +1,9 @@
 "use client";
 import { useState } from "react";
+import { formatUsd } from "@agent-firewall/policy";
 import { AGENT_ID, api, txUrl, type ActivityItem } from "@/lib/api";
 import { usePoll } from "@/lib/hooks";
-import { Callout, ErrorState, Money, OutcomeBadge, SellerTile, VerifyLink, shortAddr, shortTime } from "@/components";
+import { Callout, ErrorState, OutcomeBadge, VerifyLink, shortAddr, shortTime } from "@/components";
 
 export default function Activity() {
   const [filter, setFilter] = useState<"all" | "blocked">("all");
@@ -15,34 +16,32 @@ export default function Activity() {
 
   return (
     <>
-      <header className="page-head">
-        <div>
-          <h1>Activity</h1>
-          <p className="sub">Every payment your agent asked for, what we decided, and the proof on Arc.</p>
+      <div className="row">
+        <h1>Activity</h1>
+        <div className="filters" role="group" aria-label="Filter">
+          <button className="btn secondary" aria-pressed={filter === "all"} onClick={() => setFilter("all")}>All</button>
+          <button className="btn secondary" aria-pressed={filter === "blocked"} onClick={() => setFilter("blocked")}>Blocked only</button>
         </div>
-        <div className="segmented" role="group" aria-label="Filter">
-          <button aria-pressed={filter === "all"} onClick={() => setFilter("all")}>All</button>
-          <button aria-pressed={filter === "blocked"} onClick={() => setFilter("blocked")}>Stopped or held</button>
-        </div>
-      </header>
+      </div>
       {error && <ErrorState error={error} onRetry={refresh} />}
       {!items && !error && <p className="muted" role="status">Loading…</p>}
       {items && (
         <div className="table-wrap">
           <table>
             <thead>
-              <tr><th>Time</th><th>Status</th><th>Recipient</th><th>Why</th><th className="r">Amount</th><th className="r">Proof</th></tr>
+              <tr><th>Time</th><th>Decision</th><th>Amount</th><th>Recipient</th><th>Rule</th><th>Detail</th><th>Arc</th></tr>
             </thead>
             <tbody>
-              {items.length === 0 && <tr><td colSpan={6} className="muted">Nothing to show.</td></tr>}
+              {items.length === 0 && <tr><td colSpan={7} className="muted">Nothing to show.</td></tr>}
               {items.map((a) => (
                 <tr key={a.requestId}>
-                  <td className="muted num" style={{ whiteSpace: "nowrap" }}>{shortTime(a.at)}</td>
+                  <td className="mono">{shortTime(a.at)}</td>
                   <td><OutcomeBadge outcome={a.outcome} status={a.status} /></td>
-                  <td title={a.recipient}><span className="who"><SellerTile recipient={a.recipient} size="sm" /><span className={/^0x/i.test(a.recipient) ? "mono" : ""}>{shortAddr(a.recipient)}</span></span></td>
-                  <td><span className="reason">{a.reason}</span>{a.flags.some((f) => /injection/i.test(f)) && <><br /><span className="chip warn" style={{ marginTop: 6 }}>Possible injection</span></>}</td>
-                  <td className="r"><Money micro={a.amountMicro} /></td>
-                  <td className="r">{a.arcTx || a.arcTxUrl ? <VerifyLink href={txUrl(a.arcTx, a.arcTxUrl)}>Arc</VerifyLink> : <span className="faint">—</span>}</td>
+                  <td className="mono">{formatUsd(a.amountMicro)}</td>
+                  <td className="mono" title={a.recipient}>{shortAddr(a.recipient)}</td>
+                  <td>{a.ruleId ?? "—"}</td>
+                  <td>{a.reason}</td>
+                  <td>{a.arcTx || a.arcTxUrl ? <span className="table-verify"><VerifyLink href={txUrl(a.arcTx, a.arcTxUrl)}>verify</VerifyLink></span> : "—"}</td>
                 </tr>
               ))}
             </tbody>

@@ -117,15 +117,10 @@ export default function RulesPage() {
 
   return (
     <>
-      <header className="page-head">
-        <div>
-          <h1>Your rules</h1>
-          <p className="sub">Say what your agent may spend. We turn it into rules, test them, and lock them on Arc.</p>
-        </div>
-      </header>
-      <div className="steps">
+      <h1>Your rules</h1>
 
       <section className="panel" aria-labelledby="s1">
+        <span className="step">Step 1</span>
         <h2 id="s1">Tell us</h2>
         <div className="field">
           <label htmlFor="rules-text">Describe what your agent may spend, in your own words.</label>
@@ -136,10 +131,12 @@ export default function RulesPage() {
 
       {error && <ErrorState error={error} />}
 
+      <PasskeySetup />
 
       {rules && (
         <>
           <section className="panel" aria-labelledby="s2">
+            <span className="step">Step 2</span>
             <h2 id="s2">Here&apos;s what we understood</h2>
             {ambiguities.map((a) => (
               <div key={a.phrase} className="callout attention" role="note">
@@ -154,9 +151,8 @@ export default function RulesPage() {
               const fid = `edit-${rule.id}`;
               return (
                 <div className="rule" key={rule.id}>
-                  <div>
                   <p className="sentence">{sentenceFor(rule, views)}</p>
-                  <p className="meta">Enforced by {view?.enforcedBy ?? "the firewall"}</p>
+                  <p className="meta">Enforced by: {view?.enforcedBy ?? "the firewall"}</p>
                   {editing === rule.id && ed ? (
                     <div>
                       <label htmlFor={fid} className="muted">{ed.label}</label>
@@ -167,17 +163,16 @@ export default function RulesPage() {
                       </div>
                       {editErr && <p role="alert" style={{ color: "var(--orange)" }}>{editErr}</p>}
                     </div>
+                  ) : ed ? (
+                    <div><button className="btn secondary" onClick={() => startEdit(rule)} aria-label={`Edit: ${sentenceFor(rule, views)}`}>Edit</button></div>
                   ) : null}
-                  </div>
-                  {editing !== rule.id && ed && (
-                    <button className="btn secondary" onClick={() => startEdit(rule)} aria-label={`Edit: ${sentenceFor(rule, views)}`}>Edit</button>
-                  )}
                 </div>
               );
             })}
           </section>
 
           <section className="panel" aria-labelledby="s3">
+            <span className="step">Step 3</span>
             <h2 id="s3">Quick test</h2>
             <p className="muted">Sample payments run against these rules. Nothing is spent.</p>
             {!tests ? <p className="muted" role="status">Running…</p> : (
@@ -216,8 +211,6 @@ export default function RulesPage() {
           </section>
         </>
       )}
-      </div>
-      <PasskeySetup />
     </>
   );
 }

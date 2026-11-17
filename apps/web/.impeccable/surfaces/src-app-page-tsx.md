@@ -12,14 +12,14 @@ User asked for: "cool, but easy to follow"; rejected the dark dashboard as "gene
 
 ## Direction contract
 
-THESIS: A payments console in the UBC 2026 Hackathon palette: technical and fintech in structure, warm in color; only the payment that needs you is loud. Refuses both the promotional landing-page structure and the dark-neon dashboard.
+THESIS: Minimal, plain, calm. The original light design is the committed world; the user tried four alternatives (dark dashboard, uizze-playful, UBC marketing, UBC console) and chose to return to it as "the best, minimal simplistic."
 
-OWN-WORLD: Slate-navy (#1A2A36) full-bleed hero with a dot grid; warm off-white body (#F4F3EF); slate ink (#293C4B); Inter Black two-tone headlines (white + orange #EC8644); orange glow pills, white pills, glass pills; floating dark rounded nav; slanted orange band listing your sellers and limits; round orange badge with "left today" set around its edge (only when nothing is held); cards in three tones (slate, white, steel #9AACBB). States: orange = needs you, slate blue = allowed, brick = blocked, grey = refunded, always with words.
+OWN-WORLD: Off-white #F6F7F9 ground, white cards with 1px #DFE2E8 borders and 14px radius, text #14171F, muted #5B6270; blue #1F4FD1 = allowed, orange #B54708 = blocked/attention; Inter body, Space Grotesk headings, JetBrains Mono amounts and addresses; simple top nav with underline on the current page.
 
-STORY: Owner sees in one glance whether the agent is fine or needs them, what's left, who it can pay, and what it bought; one orange button takes them to decide.
+STORY: The owner sees status, three cards (task spend, today, waiting for you), a plain-sentence feed, and their rules as sentences.
 
-FIRST VIEWPORT: Navy dotted sidebar (nav with waiting count, agent box: id, status, task, policy hash, signer; network footer). Main: breadcrumb + Overview title + status chip, Edit rules / Pause agent. Navy alert banner per held payment with countdown + orange Review payment. One stats strip (task spend, available today, settled, stopped). Transactions table (time, counterparty tile + memo, status, right-aligned amount, Arc tx hash) beside a slate Policy card (rule kind tags, hash, verify) and Approved counterparties.
+FIRST VIEWPORT: Top nav (Home / Rules / Activity); agent name + status + Pause; three cards; "What your agent did" list.
 
-FORM: pinned by user reference, seed: none (pinned), "can you make the design similar to this: https://www.universityblockchain.org/programs/hackathon ... in terms of design" (replaces the earlier uizze pin); then "more technical ... payments and fintech vibes ... look at inspo for structure, but I do like the color scheme" (structure from Mercury/Stripe-style consoles).
+FORM: pinned by user, seed: none (pinned), "go back to the original design it was the best, minimal simplistic the original one".
 
 FINISH: unreviewed and undocumented is unfinished; this build ends with the finish review, the verdict, DESIGN.md, and every shipping raster carrying its provenance

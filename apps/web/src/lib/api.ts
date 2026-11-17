@@ -46,6 +46,7 @@ export type NotifyEvent = "hold" | "budget80" | "paused";
 
 export type PolicyInfo = {
   hash: string;
+  rules?: Rule[];
   committedTx?: string | null;
   committedTxUrl?: string | null;
   createdAt?: string;

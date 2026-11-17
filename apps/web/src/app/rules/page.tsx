@@ -126,7 +126,6 @@ export default function RulesPage() {
       <div className="steps">
 
       <section className="panel" aria-labelledby="s1">
-        <span className="step">Describe</span>
         <h2 id="s1">Tell us</h2>
         <div className="field">
           <label htmlFor="rules-text">Describe what your agent may spend, in your own words.</label>
@@ -141,7 +140,6 @@ export default function RulesPage() {
       {rules && (
         <>
           <section className="panel" aria-labelledby="s2">
-            <span className="step">Review</span>
             <h2 id="s2">Here&apos;s what we understood</h2>
             {ambiguities.map((a) => (
               <div key={a.phrase} className="callout attention" role="note">
@@ -180,7 +178,6 @@ export default function RulesPage() {
           </section>
 
           <section className="panel" aria-labelledby="s3">
-            <span className="step">Test</span>
             <h2 id="s3">Quick test</h2>
             <p className="muted">Sample payments run against these rules. Nothing is spent.</p>
             {!tests ? <p className="muted" role="status">Running…</p> : (
@@ -197,7 +194,6 @@ export default function RulesPage() {
           </section>
 
           <section className="panel" aria-labelledby="s4">
-            <span className="step">Save</span>
             <h2 id="s4">Text me when</h2>
             <div>
               <label className="check"><input type="checkbox" checked={events.hold} onChange={(e) => setEvents({ ...events, hold: e.target.checked })} /> A payment needs my approval</label>

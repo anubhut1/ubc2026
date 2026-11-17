@@ -12,7 +12,7 @@ const NAV = [
   { href: "/activity", label: "Activity", icon: "list" },
 ] as const;
 
-/** App shell: sidebar navigation (with a live count of payments waiting for you) + main column. */
+/** App shell: one sticky top bar (live count of payments waiting for you) over an airy page. */
 export function Shell({ children }: { children: ReactNode }) {
   const path = usePathname();
   const { data: summary } = usePoll(() => api<Summary>(`/v1/agents/${AGENT_ID}/summary`), 3000);
@@ -22,28 +22,39 @@ export function Shell({ children }: { children: ReactNode }) {
   const live = Boolean(health?.arc.registry);
   return (
     <div className="shell">
-      <aside className="sidebar">
-        <Link href="/" className="brand">
-          <span className="brand-mark" aria-hidden="true"><Icon name="shield" size={16} /></span>
-          Agent Firewall
-        </Link>
-        <nav aria-label="Main" className="side-nav">
-          {NAV.map((n) => (
-            <Link key={n.href} href={n.href} aria-current={path === n.href ? "page" : undefined}>
-              <Icon name={n.icon} />
-              {n.label}
-              {n.href === "/" && waiting > 0 && <span className="count" aria-label={`${waiting} waiting for you`}>{waiting}</span>}
-            </Link>
-          ))}
-        </nav>
-        <div className="side-foot">
-          <span className="net"><span className={`pulse ${health ? "" : "off"}`} aria-hidden="true" />{health ? (live ? "Arc testnet · live" : "Local mode") : "Firewall offline"}</span>
-          {summary && <span className="net"><Icon name="bot" size={14} />{summary.agent.name}</span>}
+      <header className="topbar">
+        <div className="topbar-in">
+          <Link href="/" className="brand">
+            <span className="brand-mark" aria-hidden="true"><Icon name="shield" size={18} /></span>
+            Agent Firewall
+          </Link>
+          <nav aria-label="Main" className="nav">
+            {NAV.map((n) => (
+              <Link key={n.href} href={n.href} aria-current={path === n.href ? "page" : undefined}>
+                {n.label}
+                {n.href === "/" && waiting > 0 && <span className="count" aria-label={`${waiting} waiting for you`}>{waiting}</span>}
+              </Link>
+            ))}
+          </nav>
+          <span className="spacer" />
+          <span className="net"><span className={`led ${health ? "" : "off"}`} aria-hidden="true" />{health ? (live ? "Live on Arc testnet" : "Local mode") : "Firewall offline"}</span>
         </div>
-      </aside>
-      <div className="main"><main className="page">{children}</main></div>
+      </header>
+      <main className="page">{children}</main>
     </div>
   );
+}
+
+const TILE_COLORS = ["#2563eb", "#c2410c", "#15803d", "#be185d", "#0f766e", "#0a0a0a"]; // all ≥4.5:1 with white
+const isAddress = (r: string) => /^0x[0-9a-fA-F]{6,}$/.test(r);
+/** A seller as a glossy app-icon tile. Unknown raw addresses are always a red "?" tile. */
+export function SellerTile({ recipient, size = "lg" }: { recipient: string; size?: "lg" | "sm" }) {
+  const unknown = isAddress(recipient);
+  let h = 0;
+  for (const c of recipient) h = (h * 31 + c.charCodeAt(0)) >>> 0;
+  const bg = unknown ? "#c8000a" : TILE_COLORS[h % TILE_COLORS.length];
+  const letters = unknown ? "?" : recipient.replace(/[^a-z0-9]/gi, "").slice(0, 2).toUpperCase();
+  return <span className={`tile ${size === "sm" ? "sm" : ""}`} style={{ background: bg }} aria-hidden="true">{letters}</span>;
 }
 
 /** "$9.80" → $9.<sup>80</sup>, banking-dashboard style. */
@@ -112,17 +123,19 @@ export function Callout({ title, children, tone = "info" }: { title: string; chi
   );
 }
 
-const OUTCOME_LABEL: Record<Outcome, string> = { allow: "Paid", hold: "Held for you", block: "Blocked" };
+const OUTCOME_LABEL: Record<Outcome, string> = { allow: "Paid", hold: "Needs you", block: "Blocked" };
 // What happened next matters more than the first decision (a hold can end cancelled, a reserved payment can fail).
 const STATUS_LABEL: Record<string, string> = {
-  reserved: "Paying", settled: "Paid", released: "Didn't go through", held: "Held for you",
+  reserved: "Paying", settled: "Paid", released: "Didn't go through", held: "Needs you",
   approved: "You approved", denied: "You cancelled", expired: "Refunded (no reply)", blocked: "Blocked",
 };
 export function OutcomeBadge({ outcome, status }: { outcome: Outcome; status?: string }) {
   // blue = allowed, orange = needs attention / blocked. Text label always present (not color alone).
   const label = (status && STATUS_LABEL[status]) ?? OUTCOME_LABEL[outcome];
-  const ok = status ? ["reserved", "settled", "approved"].includes(status) : outcome === "allow";
-  return <span className={`badge ${ok ? "ok" : "warn"}`}><span className="dot" aria-hidden="true" />{label}</span>;
+  const tone = status
+    ? ({ reserved: "ok", settled: "ok", approved: "ok", held: "warn", blocked: "bad", released: "off", denied: "off", expired: "off" } as Record<string, string>)[status] ?? "off"
+    : outcome === "allow" ? "ok" : outcome === "hold" ? "warn" : "bad";
+  return <span className={`badge ${tone}`}><span className="dot" aria-hidden="true" />{label}</span>;
 }
 
 export function VerifyLink({ href, children = "verify on Arc" }: { href: string | null | undefined; children?: ReactNode }) {

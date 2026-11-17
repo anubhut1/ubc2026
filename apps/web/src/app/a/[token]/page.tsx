@@ -102,7 +102,7 @@ export default function ApprovePage({ params }: { params: Promise<{ token: strin
             If you do nothing, the money is refunded in <span className="countdown" role="timer">{fmtCountdown(remaining)}</span>.
           </p>
           <div className="actions">
-            <button className="btn attention block lg" onClick={deny} disabled={busy !== null}>
+            <button className="btn ink block lg" onClick={deny} disabled={busy !== null}>
               {busy === "deny" ? "Cancelling…" : "Cancel payment"}
             </button>
             <button className="btn secondary block lg" onClick={approve} disabled={busy !== null}>

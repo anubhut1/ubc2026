@@ -2,7 +2,7 @@
 import { useState } from "react";
 import { AGENT_ID, api, txUrl, type ActivityItem } from "@/lib/api";
 import { usePoll } from "@/lib/hooks";
-import { Callout, ErrorState, Money, OutcomeBadge, VerifyLink, shortAddr, shortTime } from "@/components";
+import { Callout, ErrorState, Money, OutcomeBadge, SellerTile, VerifyLink, shortAddr, shortTime } from "@/components";
 
 export default function Activity() {
   const [filter, setFilter] = useState<"all" | "blocked">("all");
@@ -22,7 +22,7 @@ export default function Activity() {
         </div>
         <div className="segmented" role="group" aria-label="Filter">
           <button aria-pressed={filter === "all"} onClick={() => setFilter("all")}>All</button>
-          <button aria-pressed={filter === "blocked"} onClick={() => setFilter("blocked")}>Stopped only</button>
+          <button aria-pressed={filter === "blocked"} onClick={() => setFilter("blocked")}>Stopped or held</button>
         </div>
       </header>
       {error && <ErrorState error={error} onRetry={refresh} />}
@@ -39,7 +39,7 @@ export default function Activity() {
                 <tr key={a.requestId}>
                   <td className="muted num" style={{ whiteSpace: "nowrap" }}>{shortTime(a.at)}</td>
                   <td><OutcomeBadge outcome={a.outcome} status={a.status} /></td>
-                  <td className="mono" title={a.recipient}>{shortAddr(a.recipient)}</td>
+                  <td title={a.recipient}><span className="who"><SellerTile recipient={a.recipient} size="sm" /><span className={/^0x/i.test(a.recipient) ? "mono" : ""}>{shortAddr(a.recipient)}</span></span></td>
                   <td><span className="reason">{a.reason}</span>{a.flags.some((f) => /injection/i.test(f)) && <><br /><span className="chip warn" style={{ marginTop: 6 }}>Possible injection</span></>}</td>
                   <td className="r"><Money micro={a.amountMicro} /></td>
                   <td className="r">{a.arcTx || a.arcTxUrl ? <VerifyLink href={txUrl(a.arcTx, a.arcTxUrl)}>Arc</VerifyLink> : <span className="faint">—</span>}</td>

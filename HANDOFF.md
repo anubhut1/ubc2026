@@ -25,10 +25,10 @@ For how to run, the architecture and the honest safety limits, see `README.md`. 
 | **Firewall is the only x402 signer** (see "Plan changes") | `apps/firewall/src/signer.ts` | ✅ tested with the real `BatchEvmScheme` |
 | Holds: SMS (Twilio REST + signature check), NO cancels, YES refused, PAUSE, 15-min expiry sweeper | `approvals.ts`, `sms.ts`, `server.ts` | ✅ smoke-tested in SMS dry-run mode |
 | Owner passkey (WebAuthn) enrollment + approve | `approvals.ts`, `apps/web/src/passkey.tsx`, `/a/[token]` | ⚠️ code done, **never tried on a real device** |
-| Arc adapter: commitPolicy, batched logDecisions, vault hold/deny/approve/refundExpired | `apps/firewall/src/arc.ts` | ⚠️ **never run against testnet** |
-| Contracts `PolicyRegistry`, `ApprovalVault` + deploy script | `contracts/` | ✅ tested locally, ❌ not deployed |
+| Arc adapter: commitPolicy, batched logDecisions, vault hold/deny/approve/refundExpired | `apps/firewall/src/arc.ts` | ✅ live on testnet except `approve` (needs passkey) and `refundExpired` |
+| Contracts `PolicyRegistry`, `ApprovalVault` + deploy script | `contracts/` | ✅ tested + **deployed to Arc testnet** |
 | Web: Home, Rules, Activity, approve page | `apps/web` | ⚠️ builds + typechecks; **not yet clicked through against a live backend** |
-| Demo sellers (Circle Gateway middleware or `MOCK_PAYMENTS=1`), one compromised endpoint | `apps/sellers` | ✅ mock mode; ❌ real Gateway untested |
+| Demo sellers (Circle Gateway middleware or `MOCK_PAYMENTS=1`), one compromised endpoint | `apps/sellers` | ✅ mock **and live Gateway** |
 | Demo agent (no keys; normal / race / attack phases) | `apps/agent` | ✅ mock mode |
 | README with Safety limits | `README.md` | ✅ |
 
@@ -42,8 +42,30 @@ For how to run, the architecture and the honest safety limits, see `README.md`. 
 7. SQLite via built-in `node:sqlite`, not better-sqlite3 (no native build).
 8. `@circle-fin/x402-batching` pinned to **2.0.4** (matches `circlefin/arc-nanopayments`; npm latest is 4.x with a different shape).
 
+### Live on Arc testnet (verified 2026-11-16)
+End to end against real Circle Gateway + our deployed contracts:
+- ✅ **Real x402 nanopayments**: the agent (no key) buys from our sellers; the firewall signs; Circle Gateway verifies and settles.
+- ✅ Policy hash committed to `PolicyRegistry` ([tx](https://explorer.testnet.arc.io/tx/0xa72414dfe452e11c01a3468abc168b79c7a6968cfcbe5d9448069fac078c0ab0)).
+- ✅ Decisions batch-logged to `PolicyRegistry` every 10s.
+- ✅ Race on live: one $0.80 allowed, one blocked.
+- ✅ Injection: $3 held in `ApprovalVault` ([hold tx](https://explorer.testnet.arc.io/tx/0x31e87d5828f3dd19a9184a33524adf6b50ab168a00b26628f67884c910b186c4)), cancelled, refunded ([refund tx](https://explorer.testnet.arc.io/tx/0x63625b8688439e0300c4465d87e5b0c0195571a92c81a8531b32ff83b8ee3e69)); vault balance 3 → 0.
+
+| Contract / wallet | Address |
+|---|---|
+| PolicyRegistry | `0xaD5f1662D6aA4c5EBEa26faaD4b68f3F3dA1d6D7` |
+| ApprovalVault | `0x8949af64EB0ecafD2165480830Fe13e73df18DEF` |
+| Service (deployer, registry owner, vault service, treasury) | `0x61D04924230Effe51bD57879638ECe5d99Eebcc4` |
+| Vault owner (releases held funds after passkey) | `0x6e6C13010e65f070876Ec1C5aa59fB07B147b4e7` |
+| Buyer (firewall-held; Gateway balance ~2 USDC) | `0xa761a0FbC633f6491E7D69c03A8b311BBF91084E` |
+
+**Private keys are only in the original dev machine's `.env` (gitignored).** Teammates: ask for the `.env` over a private channel, or deploy your own set (README "To go live"). Faucet: faucet.circle.com → Arc Testnet → 20 USDC per address every 2h, no login.
+
+**Gotcha found live:** Circle Gateway rejects authorizations valid for under ~7 days (`authorization_validity_too_short`), but the 2.0.4 SDK's sellers advertise 4 days. The agent signs for 8 days (`apps/agent/src/index.ts`), and the firewall signer allows up to 9. Circle's docs disagree on the minimum (3 vs. 7 days). Upgrading to SDK 4.x may remove the need for this workaround.
+
+Operator commands: `npm run balance -w @agent-firewall/firewall`, `npm run deposit -w @agent-firewall/firewall -- 2`.
+
 ### Next up (in order)
-1. **Testnet bring-up:** fund keys (faucet.circle.com), deploy contracts, set env, treasury `approve(vault)`, `npm run deposit -w @agent-firewall/firewall -- 2`, run the agent with `MOCK_PAYMENTS=0`. Watch whether a real nanopayment settles through the firewall signature.
+1. ~~Testnet bring-up~~ done (above).
 2. Click through the web app against a live firewall (`npm run dev:firewall` + `dev:web`) and fix any API mismatches.
 3. Twilio: verify team phones, set `FIREWALL_PUBLIC_URL` (e.g. via a tunnel) as the inbound webhook, and test a real NO reply.
 4. Passkey on a real phone: WebAuthn needs HTTPS or localhost; the RP ID must match the approve-page host.
@@ -52,7 +74,7 @@ For how to run, the architecture and the honest safety limits, see `README.md`. 
 ### Known gaps / gotchas
 - On a fresh DB, the agent is blocked until rules are saved (deny by default). Save rules on `/rules` first.
 - If `vaultApprove` fails after a passkey OK, the DB says "approved" but funds stay in the vault until `refundExpired`. Surface this in the UI if it shows up in testing.
-- `commitPolicy` is `onlyOwner`. For the demo, deploy with `OWNER_ADDRESS` = the service address, or commits will revert.
+- Deploy script: the deployer (service key) owns `PolicyRegistry`; `OWNER_ADDRESS` owns `ApprovalVault`.
 - Disk on the original dev machine is nearly full; `apps/web/.next` is large, so delete it after builds.
 
 ---

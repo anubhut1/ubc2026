@@ -25,7 +25,7 @@ const GATEWAY_WALLETS = (process.env.GATEWAY_WALLET_ADDRESSES ?? "0x0077777d7EBA
   .split(",")
   .filter(Boolean)
   .map((a) => getAddress(a.trim()));
-const MAX_VALIDITY_S = 5 * 24 * 3600;
+const MAX_VALIDITY_S = 9 * 24 * 3600; // Gateway needs >= ~7 days; agent asks for 8
 
 const AUTH_TYPES = [
   { name: "from", type: "address" },

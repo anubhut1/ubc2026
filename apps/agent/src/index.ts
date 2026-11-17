@@ -15,6 +15,7 @@ const SELLERS = process.env.SELLERS_URL ?? "http://localhost:4200";
 const AGENT_ID = process.env.AGENT_ID ?? "research-agent";
 const TASK_ID = process.env.TASK_ID ?? "nba-injuries";
 const MOCK = process.env.MOCK_PAYMENTS === "1";
+const MIN_VALIDITY_S = 8 * 24 * 3600;
 
 const post = async (path: string, body: unknown) => {
   const r = await fetch(FW + path, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
@@ -60,7 +61,10 @@ export async function buy(path: string, opts: { recipient: string; category: Cat
     let header: string;
     const scheme = await firewallScheme(requestId);
     if (scheme) {
-      const payload = await scheme.createPaymentPayload(required.x402Version ?? 2, option);
+      // Gateway rejects authorizations valid for < ~7 days ("authorization_validity_too_short"), but
+      // @circle-fin/x402-batching 2.0.4 sellers advertise 4 days. Sign for 8 days. See docs/RESEARCH.md.
+      const signOption = { ...option, maxTimeoutSeconds: Math.max(option.maxTimeoutSeconds ?? 0, MIN_VALIDITY_S) };
+      const payload = await scheme.createPaymentPayload(required.x402Version ?? 2, signOption);
       header = Buffer.from(JSON.stringify({ ...payload, resource: required.resource, accepted: option })).toString("base64");
     } else if (MOCK) {
       header = Buffer.from(JSON.stringify({ mock: true, requestId })).toString("base64");

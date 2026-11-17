@@ -8,7 +8,8 @@
     "start": "tsx --env-file-if-exists=../../.env src/index.ts",
     "test": "vitest run",
     "typecheck": "tsc -p .",
-    "deposit": "tsx --env-file-if-exists=../../.env src/gateway-deposit.ts"
+    "deposit": "tsx --env-file-if-exists=../../.env src/gateway-deposit.ts",
+    "balance": "tsx --env-file-if-exists=../../.env src/gateway-balance.ts"
   },
   "dependencies": {
     "@agent-firewall/policy": "*",

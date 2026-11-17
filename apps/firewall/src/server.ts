@@ -45,7 +45,7 @@ function sentence(r: any): string {
     case "settled":
       return `Bought ${what.charAt(0).toLowerCase() + what.slice(1)}, ${amt}`;
     case "released":
-      return `Tried to buy ${what}, ${amt}, but the payment didn't go through (budget returned)`;
+      return `Tried to buy ${what.charAt(0).toLowerCase() + what.slice(1)}, ${amt}, but the payment didn't go through (budget returned)`;
     case "blocked":
       return `Blocked ${amt} to ${to}: ${r.reason}`;
     case "held":

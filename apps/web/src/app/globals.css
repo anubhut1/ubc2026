@@ -217,7 +217,8 @@ td.detail { min-width: 260px; }
   .tx .t-time { grid-area: time; text-align: right; font-size: .8rem; align-self: center; }
   .tx .avatar { display: none; }
 }
-.pol { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 8px; }
-.pol li { padding: 12px 14px; border-radius: 14px; background: var(--soft); font-size: .95rem; display: flex; gap: 10px; align-items: flex-start; }
-.pol li svg { flex: none; margin-top: 3px; color: var(--usdc); }
+.pol { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; }
+.pol li { padding: 12px 0; border-top: 1px solid var(--line); font-size: .95rem; display: flex; flex-direction: column; gap: 2px; }
+.pol li:first-child { border-top: 0; padding-top: 4px; }
+.pol .kind { font-size: .8rem; color: var(--muted); }
 .lockline { display: flex; align-items: center; gap: 8px; font-size: .85rem; color: var(--muted); }

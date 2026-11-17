@@ -6,6 +6,10 @@ import { AGENT_ID, api, txUrl, type ActivityItem, type Summary } from "@/lib/api
 import { useNow, usePoll } from "@/lib/hooks";
 import { Avatar, ErrorState, Icon, Money, OutcomeBadge, VerifyLink, shortAddr, shortTime } from "@/components";
 
+const KIND: Record<string, string> = {
+  perTxLimit: "Per payment", taskBudget: "Task budget", periodBudget: "Spending cap", categories: "Categories",
+  allowlist: "Recipients", timeWindow: "Hours", rateLimit: "Rate limit", approvalThreshold: "Approval", paused: "Pause",
+};
 const PAID = ["settled", "reserved", "approved"];
 const STOPPED = ["blocked", "held", "denied", "expired"];
 
@@ -123,7 +127,7 @@ export default function Home() {
           <div className={`card ${pending.length ? "attention" : ""}`}>
             <div className="card-top"><h2>Waiting for you</h2></div>
             {pending.length === 0
-              ? <p className="lockline"><Icon name="check" size={16} />Nothing is waiting.</p>
+              ? <p className="muted">Nothing is waiting.</p>
               : <p className="lockline" style={{ color: "var(--orange)" }}><Icon name="clock" size={16} />{pending.length} held · {fmtLeft(new Date(pending[0]!.expiresAt).getTime() - now)}</p>}
           </div>
         </div>
@@ -153,7 +157,7 @@ export default function Home() {
           {rules.length === 0 ? (
             <p className="muted">No rules yet, so the agent can&apos;t spend. <Link href="/rules">Set your rules</Link></p>
           ) : (
-            <ul className="pol">{rules.map((r) => <li key={r.ruleId}><Icon name="check" size={16} /><span>{r.sentence}</span></li>)}</ul>
+            <ul className="pol">{rules.map((r) => <li key={r.ruleId}><span className="kind">{KIND[r.kind] ?? r.kind}</span><span>{r.sentence}</span></li>)}</ul>
           )}
           <p className="lockline" style={{ marginTop: "auto" }}>
             <Icon name="lock" size={15} />{policy ? "Locked on Arc" : "Not locked on Arc yet"}

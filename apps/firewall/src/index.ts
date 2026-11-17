@@ -2,8 +2,10 @@ import { config } from "./config";
 import { openDb } from "./db";
 import { createApp, flushDecisionsToArc } from "./server";
 import { expireHolds } from "./approvals";
+import { releaseExpiredUnconfirmed } from "./engine";
 import { arcStatus } from "./arc";
 import { smsConfigured } from "./sms";
+import { sweepBuyerWallet, topUpGateway } from "./funding";
 
 const db = openDb(config.dbPath);
 createApp(db).listen(config.port, () => {
@@ -17,8 +19,26 @@ setInterval(async () => {
   busy = true;
   try {
     await expireHolds(db);
+    releaseExpiredUnconfirmed(db);
     await flushDecisionsToArc(db);
   } finally {
     busy = false;
   }
 }, 10_000);
+
+// Buyer exposure cap: sweep idle buyer USDC to the treasury, then top up Gateway (<= daily cap per UTC day).
+let funding = false;
+async function fundingTick() {
+  if (funding) return;
+  funding = true;
+  try {
+    await sweepBuyerWallet();
+    await topUpGateway(db);
+  } catch (e) {
+    console.error("[funding]", e instanceof Error ? e.message.split("\n")[0] : e);
+  } finally {
+    funding = false;
+  }
+}
+void fundingTick();
+setInterval(fundingTick, 60_000);

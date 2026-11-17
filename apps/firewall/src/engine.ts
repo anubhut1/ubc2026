@@ -143,10 +143,21 @@ export function markSettled(db: DB, requestId: string, txHash?: string): boolean
   return r.changes > 0;
 }
 
-/** Agent reports the payment failed: give the budget back. */
+/**
+ * Agent reports the payment failed. If the firewall never signed it, give the budget back.
+ * If it DID sign, the seller holds a valid authorization (up to ~9 days) and could still settle it,
+ * so it stays counted as "unconfirmed" until that authorization expires (fail closed: never overspend).
+ */
 export function markFailed(db: DB, requestId: string): boolean {
-  const r = db.prepare("UPDATE requests SET status='released' WHERE request_id=? AND status='reserved'").run(requestId);
+  const r = db
+    .prepare("UPDATE requests SET status = CASE WHEN signed_ms IS NULL THEN 'released' ELSE 'unconfirmed' END WHERE request_id=? AND status='reserved'")
+    .run(requestId);
   return r.changes > 0;
+}
+
+/** Release "unconfirmed" spend once its signed authorization can no longer be settled. */
+export function releaseExpiredUnconfirmed(db: DB, now = Date.now(), maxValidityMs = 9 * 24 * 3600_000): number {
+  return Number(db.prepare("UPDATE requests SET status='released' WHERE status='unconfirmed' AND signed_ms < ?").run(now - maxValidityMs).changes);
 }
 
 export function savePolicy(db: DB, agentId: string, rules: Rule[], hash: string): ActivePolicy {

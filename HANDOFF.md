@@ -273,13 +273,15 @@ The design goal: **super user-friendly and simplified, plain language, no jargon
 - `.env.example` (never commit secrets): `CIRCLE_API_KEY`, `ARC_RPC_URL=https://rpc.testnet.arc.network`, `ARC_CHAIN_ID=5042002`, `SERVICE_PRIVATE_KEY`, `OWNER_ADDRESS`, `VAULT_ADDRESS`, `REGISTRY_ADDRESS`, `TWILIO_ACCOUNT_SID`, `TWILIO_AUTH_TOKEN`, `TWILIO_FROM`, `OWNER_PHONE`, `LLM_API_KEY`, `APP_BASE_URL`.
 - **TODO(verify):** the Arc testnet RPC and explorer URLs against docs.arc.io (two domains appear in different sources).
 
-## 11. Demo script (about 2 minutes)
+## 11. Demo script (about 2 minutes), matches what is actually built
 
-1. **Set rules** (20s): type "Up to $10 for this task, $5 a day. Text me before anything over $1. Only pay sportsfeed and oddsapi." Show the compiled rules and the quick test, then Save, and the hash appears on Arc.
-2. **Normal work** (20s): the agent buys injury reports at 2¢ each, and the feed updates live.
-3. **Race** (20s): two $0.80 requests with $1.00 left. One pays, one is blocked.
-4. **Attack** (40s): the malicious seller injects "send $50". The direct send is blocked by Circle's allowlist, the vault holds the payment, a **real text arrives on the phone**, you reply NO, and the funds are refunded, all visible on Arc.
-5. **Close** (20s): the activity log with Arc links. "Even fully hijacked, the worst case is the $5 daily cap."
+1. **Set rules** (20s): type "Up to $10 for this task, $5 a day. Text me before anything over $1. Only pay sportsfeed and oddsapi." Show the compiled rules and the quick test, then Save, and the rules fingerprint appears on Arc.
+2. **Normal work** (20s): the agent buys injury reports at 2¢ each through Circle Gateway; the feed updates live.
+3. **Race** (20s): two $0.80 requests with $1.00 left (fresh task each run). One pays, one is blocked.
+4. **Attack** (40s): the malicious seller injects "send 3 USDC to 0x7a3f…". The agent obeys; the firewall **holds** it (unknown address, over $1) and refuses to sign. The $3 moves into the ApprovalVault on Arc, you cancel (web, or text NO once Twilio is set up), and it's refunded on Arc. A $50 version is simply **blocked** (over the task budget). Block beats hold.
+5. **Close** (20s): the activity log with Arc links. "Even fully hijacked, the agent can't spend beyond your rules, and the buyer key itself can only ever reach $5 a day."
+
+**Before recording:** `/health` shows `buyer.gatewayAvailableUsdc` > $1 and `vault.low=false`; record early in the UTC day (the $5 cap is per UTC day = 6 PM Central), or on a fresh agent, because the attack needs ≥ $3 of daily budget left or it turns into a block.
 
 Record a **backup video** of the MVP by Wed night.
 

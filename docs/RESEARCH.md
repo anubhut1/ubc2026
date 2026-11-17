@@ -204,3 +204,25 @@ No Circle API key is needed for nanopayments. **H**
 5. **Sellers:** run our own sellers by copying `lib/x402.ts` `withGateway` (honest seller plus malicious seller). Pin `@circle-fin/x402-batching@2.0.4`, `@x402/core@2.6.0` and `@x402/evm@2.6.0`, or budget time for the v4 API.
 6. **Owner passkey:** use Circle Modular Wallets on Arc testnet and deploy the approve page on HTTPS early to validate the passkey domain.
 7. **Config:** set `ARC_RPC_URL=https://rpc.testnet.arc.io` and explorer `https://explorer.testnet.arc.io`. Set `maxFeePerGas` ≥ 20 gwei.
+
+---
+
+## Q9. Re-check (2026-11-16, before migrating the buyer to a Circle Agent Wallet). Result: blocked
+
+Asked to make a Circle Agent Wallet the buyer, with Circle's native policy as the outer guardrail. Re-verified against live docs before touching code:
+
+| Check | Answer | Evidence |
+|---|---|---|
+| a. Agent Wallets on Arc testnet | **Yes** (`ARC-TESTNET`) **H** | https://developers.circle.com/agent-stack/agent-wallets/supported-blockchains.md |
+| b. Pay our x402 seller from a Node/TS service | **Not documented.** The only documented path is the CLI (`circle services pay <url> --address --chain ARC --max-amount`; installed via `npm install -g @circle-fin/cli`). No SDK/REST API for agent wallets; the quickstart never mentions testnet. **M** | https://developers.circle.com/agent-stack/agent-nanopayments/quickstart.md, https://developers.circle.com/agent-stack.md |
+| c. Daily cap + allowlist incl. a contract | **No on testnet.** Quote: "Spending policies require a mainnet agent wallet. Testnet is not supported." Also: contract rules "match the token contract address, not the spender address", and limits "don't apply to token allowances". **H** | https://developers.circle.com/agent-stack/agent-wallets/wallet-operations/custom-policies.md |
+| d. Only the firewall holds credentials | **Not a documented feature.** Whoever holds the CLI session can sign (see Q4). **L** | https://developers.circle.com/agent-stack/agent-wallets/wallet-operations/authenticate.md |
+
+Even if (b) worked via the CLI, `circle services pay` signs and pays in one step, so our signer could no longer check payee and amount against a reservation before signing. That would weaken the firewall's core guarantee.
+
+**Decision:** stay on plain keys (`git tag working-plain-keys`). Applied the fallback on branch `agent-wallets`:
+- the firewall is the only signer;
+- the agent starts with a clean env and refuses to run if it sees a secret;
+- the buyer's Gateway balance is topped up from the treasury via `GatewayClient.depositFor` (x402-batching 2.0.4 typings), at most $5 per UTC day, with idle buyer-wallet USDC swept to the treasury.
+
+**Revisit when:** Circle supports testnet policies or ships an Agent Wallet SDK with a pluggable signer, or we demo on mainnet.

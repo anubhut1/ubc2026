@@ -65,6 +65,13 @@ CREATE TABLE IF NOT EXISTS holds (
   sms_sid TEXT,
   hold_error TEXT                              -- why the Arc escrow failed (null = ok or not attempted)
 );
+CREATE TABLE IF NOT EXISTS gateway_topups (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  day TEXT NOT NULL,                           -- UTC date; at most the daily cap is deposited per day
+  amount_micro INTEGER NOT NULL,
+  tx TEXT,
+  created_at TEXT NOT NULL
+);
 CREATE TABLE IF NOT EXISTS passkeys (
   id TEXT PRIMARY KEY,
   public_key TEXT NOT NULL,                    -- base64url
@@ -86,8 +93,9 @@ CREATE TABLE IF NOT EXISTS sms_log (
 );
 `;
 
-export const SPENDING_STATUSES = ["reserved", "settled", "held", "approved"] as const;
-export const SPENDING_SQL = `('reserved','settled','held','approved')`;
+// "unconfirmed" = failed after the firewall signed: the seller may still settle that authorization, so it keeps counting.
+export const SPENDING_STATUSES = ["reserved", "settled", "held", "approved", "unconfirmed"] as const;
+export const SPENDING_SQL = `('reserved','settled','held','approved','unconfirmed')`;
 
 export function openDb(path: string): DB {
   const db = new DatabaseSync(path);

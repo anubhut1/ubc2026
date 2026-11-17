@@ -6,6 +6,7 @@ import { activePolicy, evaluateAndReserve, markFailed, markSettled, parsePayment
 import { compileRules } from "./compiler";
 import { defaultSamples, dryRun, type Sample } from "./dryrun";
 import { arcStatus, commitPolicyOnArc, logDecisionsOnArc, vaultFunding } from "./arc";
+import { fundingStatus } from "./funding";
 import {
   approvalOptions,
   approveWithPasskey,
@@ -46,6 +47,8 @@ function sentence(r: any): string {
       return `Bought ${what.charAt(0).toLowerCase() + what.slice(1)}, ${amt}`;
     case "released":
       return `Tried to buy ${what.charAt(0).toLowerCase() + what.slice(1)}, ${amt}, but the payment didn't go through (budget returned)`;
+    case "unconfirmed":
+      return `Payment for ${what.charAt(0).toLowerCase() + what.slice(1)}, ${amt}, failed after signing; still counted until the authorization expires`;
     case "blocked":
       return `Blocked ${amt} to ${to}: ${r.reason}`;
     case "held":
@@ -97,7 +100,8 @@ route("GET", "/health", async ({ db }) => {
   } catch (e) {
     vault = { error: e instanceof Error ? e.message.split("\n")[0]! : "unreadable" };
   }
-  return { ok: true, signer: signerAddress(), arc: arcStatus(), vault, twilio: smsConfigured(), llm: Boolean(config.llmApiKey), passkey: hasPasskey(db) };
+  const buyer = await fundingStatus(db).catch((e) => ({ enabled: true, error: e instanceof Error ? e.message.split("\n")[0]! : "unreadable" }));
+  return { ok: true, signer: signerAddress(), arc: arcStatus(), vault, buyer, twilio: smsConfigured(), llm: Boolean(config.llmApiKey), passkey: hasPasskey(db) };
 });
 
 route("GET", "/v1/agents/:agentId/summary", ({ db, params }) => {

@@ -82,7 +82,7 @@ const OUTCOME_LABEL: Record<Outcome, string> = { allow: "Paid", hold: "Held for 
 // What happened next matters more than the first decision (a hold can end cancelled, a reserved payment can fail).
 const STATUS_LABEL: Record<string, string> = {
   reserved: "Paying", settled: "Paid", released: "Didn't go through", held: "Held for you",
-  approved: "You approved", denied: "You cancelled", expired: "Refunded (no reply)", blocked: "Blocked",
+  approved: "You approved", unconfirmed: "Unconfirmed", denied: "You cancelled", expired: "Refunded (no reply)", blocked: "Blocked",
 };
 export function OutcomeBadge({ outcome, status }: { outcome: Outcome; status?: string }) {
   // blue = allowed, orange = needs attention / blocked. Text label always present (not color alone).

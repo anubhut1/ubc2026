@@ -4,7 +4,7 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "start": "tsx --env-file-if-exists=../../.env src/index.ts",
+    "start": "bash ../../scripts/run-agent.sh",
     "typecheck": "tsc -p ."
   },
   "dependencies": {
@@ -15,5 +15,9 @@
     "@x402/evm": "2.6.0",
     "viem": "2.57.20"
   },
-  "devDependencies": { "tsx": "4.23.15", "typescript": "^5.9.3", "@types/node": "^22.19.0" }
+  "devDependencies": {
+    "tsx": "4.23.15",
+    "typescript": "^5.9.3",
+    "@types/node": "^22.19.0"
+  }
 }

@@ -10,6 +10,14 @@ import { BatchEvmScheme } from "@circle-fin/x402-batching/client";
 import { formatUsd, type Category } from "@agent-firewall/policy";
 import type { Address, Hex } from "viem";
 
+// Isolation guard: the agent must never be able to see a signing key or API secret. If one leaked into
+// its environment (e.g. a shared .env), refuse to run instead of quietly holding it.
+const LEAKED = Object.keys(process.env).filter((k) => /PRIVATE_KEY|SECRET|AUTH_TOKEN|API_KEY|MNEMONIC/i.test(k) && process.env[k]);
+if (LEAKED.length) {
+  console.error(`Refusing to start: the agent can see secrets (${LEAKED.join(", ")}). Give the agent only .env.agent.`);
+  process.exit(78);
+}
+
 const FW = process.env.FIREWALL_URL ?? "http://localhost:4000";
 const SELLERS = process.env.SELLERS_URL ?? "http://localhost:4200";
 const AGENT_ID = process.env.AGENT_ID ?? "research-agent";
@@ -42,7 +50,7 @@ interface BuyResult {
 }
 
 /** Buy one x402 resource through the firewall. */
-export async function buy(path: string, opts: { recipient: string; category: Category; purpose: string; sourceContext?: string }): Promise<BuyResult> {
+export async function buy(path: string, opts: { recipient: string; category: Category; purpose: string; sourceContext?: string; taskId?: string }): Promise<BuyResult> {
   const url = SELLERS + path;
   const first = await fetch(url);
   if (first.status !== 402) return { outcome: "error", reason: `expected 402, got ${first.status}` };
@@ -52,7 +60,7 @@ export async function buy(path: string, opts: { recipient: string; category: Cat
 
   const requestId = `req_${randomUUID()}`;
   const decision = await post("/v1/payments/evaluate", {
-    requestId, agentId: AGENT_ID, taskId: TASK_ID, recipient: opts.recipient,
+    requestId, agentId: AGENT_ID, taskId: opts.taskId ?? TASK_ID, recipient: opts.recipient,
     amountMicro: Number(option.amount), category: opts.category, purpose: opts.purpose, sourceContext: opts.sourceContext,
   });
   if (decision.outcome !== "allow") return { outcome: decision.outcome, reason: decision.reason };
@@ -95,10 +103,12 @@ async function normal(n: number) {
 }
 
 async function race() {
-  console.log("\n▶ Race: two $0.80 bulk-odds requests at the same instant");
+  // A fresh task each run, so the task budget starts full and the demo is repeatable.
+  const taskId = `${TASK_ID}-${Date.now().toString(36)}`;
+  console.log(`\n▶ Race: two $0.80 bulk-odds requests at the same instant (task ${taskId})`);
   const [a, b] = await Promise.all([
-    buy("/oddsapi/odds/bulk", { recipient: "oddsapi", category: "data", purpose: "Bulk odds (A)" }),
-    buy("/oddsapi/odds/bulk", { recipient: "oddsapi", category: "data", purpose: "Bulk odds (B)" }),
+    buy("/oddsapi/odds/bulk", { recipient: "oddsapi", category: "data", purpose: "Bulk odds (A)", taskId }),
+    buy("/oddsapi/odds/bulk", { recipient: "oddsapi", category: "data", purpose: "Bulk odds (B)", taskId }),
   ]);
   log("request A", a);
   log("request B", b);

@@ -9,7 +9,7 @@
 // API per @circle-fin/x402-batching@2.0.4 typings: GatewayClient.getBalances(), depositFor(amount, depositor).
 import "./network";
 import { GatewayClient } from "@circle-fin/x402-batching/client";
-import { createWalletClient, http, parseAbi, type Hex } from "viem";
+import { createWalletClient, getAddress, http, isAddress, parseAbi, type Hex } from "viem";
 import { privateKeyToAccount } from "viem/accounts";
 import { config } from "./config";
 import type { DB } from "./db";
@@ -25,7 +25,11 @@ const buyerKey = process.env.BUYER_PRIVATE_KEY as Hex | undefined;
 const treasuryKey = config.arc.servicePrivateKey;
 const buyerAccount = paymentMode === "local-key" && buyerKey ? privateKeyToAccount(buyerKey) : null;
 /** Whose Gateway balance we top up: the Circle Agent Wallet, or the local buyer key's address. */
-const payer = paymentMode === "circle-agent-wallet" ? circleWalletAddress() : (buyerAccount?.address ?? null);
+// An Agent Wallet's Gateway balance belongs to its "backing EOA", not the SCA address. `circle gateway balance
+// --output json` reports it as backingEOA; depositing for the SCA would fund a balance the CLI never spends.
+const backingEoa = process.env.CIRCLE_GATEWAY_DEPOSITOR && isAddress(process.env.CIRCLE_GATEWAY_DEPOSITOR) ? getAddress(process.env.CIRCLE_GATEWAY_DEPOSITOR) : null;
+const payer = paymentMode === "circle-agent-wallet" ? (circleWalletAddress() ? backingEoa : null) : (buyerAccount?.address ?? null);
+if (paymentMode === "circle-agent-wallet" && circleWalletAddress() && !backingEoa) console.warn("[funding] CIRCLE_GATEWAY_DEPOSITOR (the wallet's backingEOA) is not set: automatic Gateway top-ups are off.");
 const enabled = network === "testnet" && Boolean(payer && treasuryKey) && process.env.MOCK_PAYMENTS !== "1" && process.env.FUNDING !== "off";
 
 const treasury = enabled ? new GatewayClient({ chain: "arcTestnet", privateKey: treasuryKey!, rpcUrl: config.arc.rpcUrl }) : null;

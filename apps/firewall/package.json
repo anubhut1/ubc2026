@@ -11,7 +11,8 @@
     "deposit": "tsx --env-file-if-exists=../../.env.firewall src/gateway-deposit.ts",
     "balance": "tsx --env-file-if-exists=../../.env.firewall src/gateway-balance.ts",
     "vault:approve": "tsx --env-file-if-exists=../../.env.firewall src/vault-approve.ts",
-    "start:mainnet": "NETWORK=mainnet tsx --env-file-if-exists=../../.env.firewall src/index.ts"
+    "start:mainnet": "NETWORK=mainnet tsx --env-file-if-exists=../../.env.firewall src/index.ts",
+    "peek": "tsx --env-file-if-exists=../../.env.firewall src/gateway-peek.ts"
   },
   "dependencies": {
     "@agent-firewall/policy": "*",

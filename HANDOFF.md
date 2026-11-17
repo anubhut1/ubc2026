@@ -325,6 +325,8 @@ Record a **backup video** of the MVP by Wed night.
 
 Fallback: `PAYMENT_MODE=local-key` (old firewall-held buyer key).
 
+Gotcha: an Agent Wallet's Gateway balance belongs to its **backing EOA** (`circle gateway balance --output json` → `backingEOA`; ours is `0x74f1e850fc6c03546e59e6aef7db41ff9f0e318b`), not the wallet address. The top-up job deposits for `CIRCLE_GATEWAY_DEPOSITOR` (verified: treasury depositFor $0.50 → CLI balance 4.06 → 4.56).
+
 Gotcha: the $5/day top-up ledger is shared across payers. On a day the old buyer was already topped up, fund the Agent Wallet by hand (`circle gateway deposit`).
 
 ### Mainnet

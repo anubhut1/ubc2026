@@ -1,0 +1,45 @@
+import { formatUsd } from "./money";
+import type { Rule } from "./types";
+
+const DAY_NAMES = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
+const hour = (n: number) => `${((n + 11) % 12) + 1}${n < 12 ? "am" : "pm"}`;
+
+/** Who actually enforces a rule. Shown on the Rules page so users know what's hard vs. soft. */
+export function enforcedBy(rule: Rule): string {
+  switch (rule.kind) {
+    case "periodBudget":
+      return rule.period === "day" ? "Circle wallet cap + Agent Firewall" : "Agent Firewall";
+    case "allowlist":
+      return "Circle wallet allowlist + Agent Firewall";
+    case "approvalThreshold":
+      return "Agent Firewall + Arc ApprovalVault";
+    default:
+      return "Agent Firewall";
+  }
+}
+
+/** Plain-English sentence for a rule. No jargon. */
+export function describeRule(rule: Rule): string {
+  switch (rule.kind) {
+    case "perTxLimit":
+      return `No single payment over ${formatUsd(rule.maxMicro)}.`;
+    case "taskBudget":
+      return rule.taskId === "*" ? `Up to ${formatUsd(rule.maxMicro)} per task.` : `Up to ${formatUsd(rule.maxMicro)} for task "${rule.taskId}".`;
+    case "periodBudget":
+      return `Up to ${formatUsd(rule.maxMicro)} a ${rule.period}.`;
+    case "categories":
+      return `Only buy ${rule.allowed.join(", ")}.`;
+    case "allowlist":
+      return `Only pay ${rule.recipients.join(", ")}. Anyone else needs your OK.`;
+    case "timeWindow": {
+      const days = rule.days.length === 0 || rule.days.length === 7 ? "any day" : rule.days.map((d) => DAY_NAMES[d]).join(", ");
+      return `Only spend ${hour(rule.startHour)}–${hour(rule.endHour)} (${rule.tz}), ${days}.`;
+    }
+    case "rateLimit":
+      return `Pause the agent if it makes more than ${rule.maxPerMinute} payments in a minute.`;
+    case "approvalThreshold":
+      return `Text me before any payment over ${formatUsd(rule.aboveMicro)}.`;
+    case "paused":
+      return "All spending is paused.";
+  }
+}

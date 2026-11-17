@@ -1,0 +1,13 @@
+node_modules/
+.env
+.env.local
+*.db
+*.db-journal
+*.db-wal
+*.db-shm
+.next/
+dist/
+contracts/out/
+contracts/cache/
+contracts/broadcast/
+.DS_Store

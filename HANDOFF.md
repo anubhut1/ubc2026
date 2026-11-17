@@ -24,7 +24,7 @@ For how to run, the architecture and the honest safety limits, see `README.md`. 
 | English→rules compiler (Claude `claude-opus-5-5` structured output; offline regex fallback), ambiguity flags, dry run, confirm-gated save | `apps/firewall/src/compiler.ts`, `dryrun.ts` | ✅ (LLM path untested without key) |
 | **Firewall is the only x402 signer** (see "Plan changes") | `apps/firewall/src/signer.ts` | ✅ tested with the real `BatchEvmScheme` |
 | Holds: SMS (Twilio REST + signature check), NO cancels, YES refused, PAUSE, 15-min expiry sweeper | `approvals.ts`, `sms.ts`, `server.ts` | ✅ smoke-tested in SMS dry-run mode |
-| Owner passkey (WebAuthn) enrollment + approve | `approvals.ts`, `apps/web/src/passkey.tsx`, `/a/[token]` | ⚠️ code done, **never tried on a real device** |
+| Owner passkey (WebAuthn) enrollment + approve | `approvals.ts`, `apps/web/src/passkey.tsx`, `/a/[token]` | ✅ **verified 2026-11-16 with Touch ID in Chrome on macOS (localhost)**: $1.50 hold to sportsfeed → passkey approve → vault released to seller ([tx](https://explorer.testnet.arc.io/tx/0xc0ca1da8c9949055cf73a0be06228e1fab6f4626bcd2530970d789a5fe434018)). Phone still needs an HTTPS tunnel + matching `WEBAUTHN_RP_ID` |
 | Arc adapter: commitPolicy, batched logDecisions, vault hold/deny/approve/refundExpired | `apps/firewall/src/arc.ts` | ✅ live on testnet except `approve` (needs passkey) and `refundExpired` |
 | Contracts `PolicyRegistry`, `ApprovalVault` + deploy script | `contracts/` | ✅ tested + **deployed to Arc testnet** |
 | Web: Home, Rules, Activity, approve page | `apps/web` | ✅ clicked through against the live testnet backend (Home cards update live, Review → approve page → Cancel refunds onchain). Passkey approve still untested |
@@ -69,7 +69,7 @@ Operator commands: `npm run balance -w @agent-firewall/firewall`, `npm run depos
 1. ~~Testnet bring-up~~ done (above).
 2. ~~Click through the web app~~ done. Remaining UI polish is optional.
 3. Twilio: verify team phones, set `FIREWALL_PUBLIC_URL` (e.g. via a tunnel) as the inbound webhook, and test a real NO reply.
-4. Passkey on a real phone: WebAuthn needs HTTPS or localhost; the RP ID must match the approve-page host.
+4. ~~Passkey approve~~ done on Mac (Touch ID). Optional: phone via HTTPS tunnel; set `APP_BASE_URL` + `WEBAUTHN_RP_ID` to the tunnel host and re-register the passkey there.
 5. Record a backup video of `npm run demo:local` + web UI.
 
 ### Known gaps / gotchas

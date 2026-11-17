@@ -309,7 +309,25 @@ Record a **backup video** of the MVP by Wed night.
 5. Are there real x402 sellers in Circle's marketplace we can use, or do we run our own (disclosed as demo sellers)?
 6. The passkey approval path: use Circle Wallets (user-controlled, passkey) for the owner, or WebAuthn plus an owner key held by our service? Prefer Circle's option if feasible.
 
-## 15. Mainnet Agent Wallet (branch `mainnet-agent-wallet`; `main` stays testnet-only)
+## 15. Circle Agent Wallets (branch `circle-agent-wallets`): testnet default, mainnet behind `NETWORK=mainnet`
+
+**Testnet (default), verified 2026-11-17.** Payer: Agent Wallet `0xbc98fa7d89306239f72d4946aedd478fddf1693d` (ARC-TESTNET; `CIRCLE_AGENT_WALLET_ADDRESS` in `.env.firewall`). Funded from the Circle faucet, with $5 deposited to Gateway.
+
+| Test | Result |
+|---|---|
+| Happy path | Live nanopayments paid by the Agent Wallet via the firewall; Gateway balance 5.00 → 4.98 after the first |
+| Race (stress-api, 20 × $0.80 vs $1) | 1 allowed / 19 blocked; live race paid $0.80 once, blocked the other |
+| Idempotency, release on unsigned failure | Pass |
+| Payer refuses blocked/held requests | Pass (`/pay` → 403) |
+| Injection | $3 to a raw address HELD on Arc (hold tx `0xe168934e…7b5d`); `/pay` refused |
+| Isolation | Agent exits 78 if it sees a secret. Under the agent's empty HOME, the CLI has no session (it even asks for terms again) |
+| Retries / failure after the CLI ran | Counted as "unconfirmed"; Circle refusals logged as "Circle wallet policy" (verified with a stand-in CLI) |
+
+Fallback: `PAYMENT_MODE=local-key` (old firewall-held buyer key).
+
+Gotcha: the $5/day top-up ledger is shared across payers. On a day the old buyer was already topped up, fund the Agent Wallet by hand (`circle gateway deposit`).
+
+### Mainnet
 
 Why the design is a *payer*, not a *signer*: Agent Wallets are smart-contract accounts, and Gateway nanopayments don't accept ERC-1271 signatures. The only documented way to pay x402 from an Agent Wallet is `circle services pay`. See `docs/RESEARCH.md` Q10.
 
@@ -331,8 +349,8 @@ circle wallet limit --address $W --chain ARC        # verify both rules
 Then put `W` in `.env.firewall.mainnet` as `CIRCLE_AGENT_WALLET_ADDRESS`.
 
 **Run:**
-- Mainnet seller: `npm run mainnet -w @agent-firewall/sellers` (port 4300).
-- Mainnet firewall: `npm run start:mainnet -w @agent-firewall/firewall` (port 4100, own DB).
+- Mainnet seller: `NETWORK=mainnet npm run mainnet -w @agent-firewall/sellers` (port 4300).
+- Mainnet firewall: `NETWORK=mainnet npm start -w @agent-firewall/firewall` (port 4100, own DB; refuses `local-key`).
 - Agent: `FIREWALL_URL=http://localhost:4100 SELLERS_URL=http://localhost:4300 bash scripts/run-agent.sh normal 1`.
 
 The demo seller's payee is the treasury address, so test payments are recoverable.

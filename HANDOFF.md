@@ -72,6 +72,8 @@ Operator commands: `npm run balance -w @agent-firewall/firewall`, `npm run depos
 5. Record a backup video of `npm run demo:local` + web UI.
 
 ### Known gaps / gotchas
+- **UI design:** a dark app shell modeled on banking dashboards like Mercury: sidebar nav with a waiting-count badge, big numbers with superscript cents, quiet cards, exception-first "Waiting for you" card. Tokens are in `apps/web/src/app/globals.css`; keep blue = allowed and orange = attention (color-blind safe).
+- The Rules page quick test uses the agent's *current* spend, so after the attack scene the $3 sample shows Blocked (daily budget). Record the Rules scene first.
 - On a fresh DB, the agent is blocked until rules are saved (deny by default). Save rules on `/rules` first.
 - If `vaultApprove` fails after a passkey OK, the DB says "approved" but funds stay in the vault until `refundExpired`. Surface this in the UI if it shows up in testing.
 - Deploy script: the deployer (service key) owns `PolicyRegistry`; `OWNER_ADDRESS` owns `ApprovalVault`.

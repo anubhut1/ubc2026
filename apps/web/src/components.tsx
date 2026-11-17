@@ -12,7 +12,7 @@ const NAV = [
   { href: "/activity", label: "Activity", icon: "list" },
 ] as const;
 
-/** App shell: one sticky top bar (live count of payments waiting for you) over an airy page. */
+/** App shell: navy sidebar (nav, agent status, network) + console column. */
 export function Shell({ children }: { children: ReactNode }) {
   const path = usePathname();
   const { data: summary } = usePoll(() => api<Summary>(`/v1/agents/${AGENT_ID}/summary`), 3000);
@@ -20,27 +20,40 @@ export function Shell({ children }: { children: ReactNode }) {
   if (path.startsWith("/a/")) return <>{children}</>; // approve page is a focused, standalone screen
   const waiting = summary?.pending.length ?? 0;
   const live = Boolean(health?.arc.registry);
+  const paused = summary?.agent.status === "paused";
   return (
     <div className="shell">
-      <header className="topbar">
-        <div className="topbar-in">
-          <Link href="/" className="brand">
-            <span className="brand-mark" aria-hidden="true"><Icon name="shield" size={18} /></span>
-            Agent Firewall
-          </Link>
-          <nav aria-label="Main" className="nav">
-            {NAV.map((n) => (
-              <Link key={n.href} href={n.href} aria-current={path === n.href ? "page" : undefined}>
-                {n.label}
-                {n.href === "/" && waiting > 0 && <span className="count" aria-label={`${waiting} waiting for you`}>{waiting}</span>}
-              </Link>
-            ))}
-          </nav>
-          <span className="spacer" />
-          <span className="net"><span className={`led ${health ? "" : "off"}`} aria-hidden="true" />{health ? (live ? "Live on Arc testnet" : "Local mode") : "Firewall offline"}</span>
+      <aside className="sidebar">
+        <Link href="/" className="brand">
+          <span className="brand-mark" aria-hidden="true"><Icon name="shield" size={17} /></span>
+          Agent Firewall
+        </Link>
+        <nav aria-label="Main" className="nav">
+          {NAV.map((n) => (
+            <Link key={n.href} href={n.href} aria-current={path === n.href ? "page" : undefined}>
+              <Icon name={n.icon} size={17} />
+              {n.label}
+              {n.href === "/" && waiting > 0 && <span className="count" aria-label={`${waiting} waiting for you`}>{waiting}</span>}
+            </Link>
+          ))}
+        </nav>
+        {summary && (
+          <>
+            <span className="side-label">Agent</span>
+            <div className="agent-box">
+              <div className="row" style={{ gap: 8 }}><b>{summary.agent.id}</b><span className={`chip ${paused ? "warn" : "ok"}`}><span className="dot" aria-hidden="true" />{paused ? "Paused" : "Active"}</span></div>
+              <div className="kv-row"><span>Task</span><span>{summary.task.id}</span></div>
+              <div className="kv-row"><span>Policy</span><span>{summary.policy ? `${summary.policy.hash.slice(0, 8)}…` : "none"}</span></div>
+              <div className="kv-row"><span>Signer</span><span>firewall</span></div>
+            </div>
+          </>
+        )}
+        <div className="side-foot">
+          <span className="net"><span className={`led ${health ? "" : "off"}`} aria-hidden="true" />{health ? (live ? "Arc testnet · connected" : "Local mode") : "Firewall offline"}</span>
+          <span className="net" style={{ color: "#8fa1af", fontWeight: 500 }}>Chain 5042002 · USDC</span>
         </div>
-      </header>
-      <main className="page">{children}</main>
+      </aside>
+      <div className="main"><main className="page">{children}</main></div>
     </div>
   );
 }

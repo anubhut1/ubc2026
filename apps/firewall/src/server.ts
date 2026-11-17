@@ -21,7 +21,7 @@ import {
 } from "./approvals";
 import { sendSms, smsConfigured, twiml, validTwilioSignature } from "./sms";
 import { SignError, signForRequest } from "./signer";
-import { PAY_NETWORK, PayError, payWithCircle, payerAddress, paymentMode } from "./payer";
+import { PAY_NETWORK, PayError, network, payWithCircle, payerAddress, paymentMode } from "./payer";
 
 class HttpError extends Error {
   constructor(public status: number, message: string) {
@@ -103,7 +103,7 @@ route("GET", "/health", async ({ db }) => {
     vault = { error: e instanceof Error ? e.message.split("\n")[0]! : "unreadable" };
   }
   const buyer = await fundingStatus(db).catch((e) => ({ enabled: true, error: e instanceof Error ? e.message.split("\n")[0]! : "unreadable" }));
-  return { ok: true, signer: payerAddress(), paymentMode, arc: arcStatus(), vault, buyer, twilio: smsConfigured(), llm: Boolean(config.llmApiKey), passkey: hasPasskey(db) };
+  return { ok: true, signer: payerAddress(), paymentMode, network, arc: arcStatus(), vault, buyer, twilio: smsConfigured(), llm: Boolean(config.llmApiKey), passkey: hasPasskey(db) };
 });
 
 route("GET", "/v1/agents/:agentId/summary", ({ db, params }) => {
@@ -212,7 +212,7 @@ route("POST", "/v1/payments/evaluate", async ({ db, body }) => {
   // The agent never receives the approval token.
   return { ...res.decision, duplicate: res.duplicate, policyHash: res.policyHash };
 });
-route("GET", "/v1/signer", () => ({ address: payerAddress(), mode: paymentMode, network: PAY_NETWORK }));
+route("GET", "/v1/signer", () => ({ address: payerAddress(), mode: paymentMode, network: PAY_NETWORK, arcNetwork: network }));
 // circle-agent-wallet mode: the firewall makes the paid request itself (see payer.ts).
 route("POST", "/v1/payments/:requestId/pay", async ({ db, params, body }) => {
   if (typeof body?.url !== "string") throw new HttpError(400, "url is required");

@@ -7,6 +7,7 @@
 //     `circle services pay <url> --address --chain ARC --max-amount <usdc> -q`, after checking the
 //     seller's 402 matches the reservation. See docs/RESEARCH.md Q10.
 // Either way the agent holds no credentials.
+import { network } from "./network";
 import { execFile } from "node:child_process";
 import { getAddress, isAddress } from "viem";
 import { immediate, type DB } from "./db";
@@ -15,16 +16,20 @@ import { markFailed, markSettled } from "./engine";
 import { signerAddress } from "./signer";
 
 export type PaymentMode = "local-key" | "circle-agent-wallet";
-export const paymentMode: PaymentMode = process.env.PAYMENT_MODE === "circle-agent-wallet" ? "circle-agent-wallet" : "local-key";
+/** Circle Agent Wallet is the default; PAYMENT_MODE=local-key is the one-variable fallback (testnet only). */
+export const paymentMode: PaymentMode = process.env.PAYMENT_MODE === "local-key" ? "local-key" : "circle-agent-wallet";
+if (network === "mainnet" && paymentMode === "local-key") throw new Error("PAYMENT_MODE=local-key is testnet-only. Mainnet pays from a Circle Agent Wallet.");
 
 const CIRCLE_BIN = process.env.CIRCLE_CLI_BIN ?? "circle";
 const CIRCLE_WALLET = process.env.CIRCLE_AGENT_WALLET_ADDRESS ?? "";
-const CIRCLE_CHAIN = process.env.CIRCLE_CHAIN ?? "ARC";
+const CIRCLE_CHAIN = process.env.CIRCLE_CHAIN ?? (network === "mainnet" ? "ARC" : "ARC-TESTNET");
 /** CAIP-2 network of the seller's Gateway option. Arc mainnet = eip155:5042 (x402-batching 3.5.0). */
-export const PAY_NETWORK = process.env.PAY_NETWORK ?? (paymentMode === "circle-agent-wallet" ? "eip155:5042" : "eip155:5042002");
+export const PAY_NETWORK = process.env.PAY_NETWORK ?? (network === "mainnet" ? "eip155:5042" : "eip155:5042002");
 /** The firewall only fetches/pays URLs under these prefixes (no arbitrary outbound requests). */
 const PAY_URL_PREFIXES = (process.env.PAY_URL_PREFIXES ?? process.env.SELLERS_URL ?? "http://localhost:4200").split(",").map((s) => s.trim()).filter(Boolean);
 
+export { network };
+export const circleWalletAddress = () => (isAddress(CIRCLE_WALLET) ? getAddress(CIRCLE_WALLET) : null);
 export const payerAddress = () => (paymentMode === "circle-agent-wallet" ? CIRCLE_WALLET || null : signerAddress());
 
 export class PayError extends Error {

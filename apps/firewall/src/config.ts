@@ -1,3 +1,4 @@
+import "./network";
 const env = (k: string) => {
   const v = process.env[k];
   return v && v.trim() !== "" ? v.trim() : undefined;

@@ -10,8 +10,8 @@
     "typecheck": "tsc -p .",
     "deposit": "tsx --env-file-if-exists=../../.env.firewall src/gateway-deposit.ts",
     "balance": "tsx --env-file-if-exists=../../.env.firewall src/gateway-balance.ts",
-    "start:mainnet": "tsx --env-file-if-exists=../../.env.firewall --env-file-if-exists=../../.env.firewall.mainnet src/index.ts",
-    "vault:approve": "tsx --env-file-if-exists=../../.env.firewall src/vault-approve.ts"
+    "vault:approve": "tsx --env-file-if-exists=../../.env.firewall src/vault-approve.ts",
+    "start:mainnet": "NETWORK=mainnet tsx --env-file-if-exists=../../.env.firewall src/index.ts"
   },
   "dependencies": {
     "@agent-firewall/policy": "*",

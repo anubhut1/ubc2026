@@ -6,12 +6,16 @@
 // testnets. 3.5.0 defaults to the mainnet facilitator https://gateway-api.circle.com, and Arc mainnet is
 // CAIP-2 eip155:5042 (read from the installed package; docs/RESEARCH.md Q10).
 //
-//   MAINNET_SELLER_ADDRESS=0x... MAINNET_SELLERS_PORT=4300 npm run mainnet -w @agent-firewall/sellers
+//   NETWORK=mainnet npm run mainnet -w @agent-firewall/sellers   (payee from MAINNET_SELLER_ADDRESS in .env.sellers)
 // The payee is an address only: no keys here. Payments land in that address's Gateway balance.
 import { createServer } from "node:http";
 import { getAddress, isAddress } from "viem";
 import { createGatewayMiddleware } from "x402-batching-mainnet/server";
 
+if (process.env.NETWORK !== "mainnet") {
+  console.error("Refusing to start: the mainnet seller only runs with NETWORK=mainnet set explicitly.");
+  process.exit(1);
+}
 const PORT = Number(process.env.MAINNET_SELLERS_PORT ?? 4300);
 const ARC_MAINNET = "eip155:5042";
 const payee = process.env.MAINNET_SELLER_ADDRESS ?? "";

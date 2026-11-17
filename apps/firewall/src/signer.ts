@@ -5,6 +5,7 @@
 // Shape verified against @circle-fin/x402-batching@2.0.4 BatchEvmScheme.signAuthorization
 // (dist/client/index.js): domain {name:"GatewayWalletBatched", version:"1", chainId, verifyingContract},
 // primaryType "TransferWithAuthorization", message {from,to,value,validAfter,validBefore,nonce}.
+import "./network";
 import { getAddress, isAddress, type Hex } from "viem";
 import { privateKeyToAccount } from "viem/accounts";
 import { config } from "./config";

@@ -1,10 +1,11 @@
 "use client";
-import { use, useEffect, useState } from "react";
+import Link from "next/link";
+import { use, useEffect, useState, type ReactNode } from "react";
 import { startAuthentication } from "@simplewebauthn/browser";
 import { formatUsd } from "@agent-firewall/policy";
 import { ApiError, api, txUrl, type HeldPayment } from "@/lib/api";
 import { useNow } from "@/lib/hooks";
-import { ErrorState, VerifyLink, shortAddr } from "@/components";
+import { Avatar, ErrorState, Icon, shortAddr } from "@/components";
 
 type Held = HeldPayment & { agentName?: string };
 
@@ -13,6 +14,7 @@ function fmtCountdown(ms: number) {
   return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, "0")}`;
 }
 
+/** A payment request laid out like a receipt (Stripe / Venmo style): who, how much, details, then the decision. */
 export default function ApprovePage({ params }: { params: Promise<{ token: string }> }) {
   const { token } = use(params);
   const [held, setHeld] = useState<Held | null>(null);
@@ -30,6 +32,13 @@ export default function ApprovePage({ params }: { params: Promise<{ token: strin
     }
   }
   useEffect(() => { void load(); /* eslint-disable-next-line react-hooks/exhaustive-deps */ }, [token]);
+  // While the escrow tx is in flight, poll so the page flips to "Held on Arc" on its own.
+  useEffect(() => {
+    if (!held || held.status !== "held" || held.holdTx || held.holdError) return;
+    const id = setInterval(load, 2000);
+    return () => clearInterval(id);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [held?.status, held?.holdTx, held?.holdError]);
 
   async function deny() {
     setBusy("deny"); setMsg(null);
@@ -57,10 +66,11 @@ export default function ApprovePage({ params }: { params: Promise<{ token: strin
 
   if (!held) {
     return (
-      <div className="approve">
+      <div className="pay">
+        <Link href="/" className="pay-back"><Icon name="back" size={16} />Back to overview</Link>
         {error
           ? error.status === 404
-            ? <div className="callout attention" role="alert"><strong>This link isn&apos;t valid anymore.</strong><p>It may have been used or expired. Nothing is waiting on you here.</p></div>
+            ? <div className="pay-card"><div className="pay-result"><span className="result-icon warn"><Icon name="alert" size={22} /></span><h1>Link no longer valid</h1><p className="muted">It may have been used or expired. Nothing is waiting on you here.</p></div></div>
             : <ErrorState error={error} onRetry={load} />
           : <p className="muted" role="status">Loading…</p>}
       </div>
@@ -69,54 +79,89 @@ export default function ApprovePage({ params }: { params: Promise<{ token: strin
 
   const remaining = new Date(held.expiresAt).getTime() - now;
   const open = held.status === "held" && remaining > 0;
-  const closedText: Record<string, string> = {
-    approved: "You approved this payment. It has been sent.",
-    denied: "You cancelled this payment. The money is being returned.",
-    expired: "This payment expired and the money was returned.",
-    held: "This payment expired and the money is being returned.",
-  };
+  const onArc = Boolean(held.holdTx);
+  const holdUrl = txUrl(held.holdTx, held.holdTxUrl);
+  const resolveUrl = txUrl(held.resolveTx, held.resolveTxUrl);
+  const amount = formatUsd(held.amountMicro);
+  const to = held.recipient.length > 22 ? shortAddr(held.recipient) : held.recipient;
+
+  const escrowRow: ReactNode = onArc
+    ? <a href={holdUrl ?? undefined} target="_blank" rel="noreferrer" className="pay-link">Held on Arc <Icon name="arrow" size={12} /></a>
+    : held.holdError
+      ? <span className="warn-text">Not recorded on Arc</span>
+      : held.status === "held" ? <span className="muted">Recording on Arc…</span> : <span className="muted">Not on Arc</span>;
 
   return (
-    <div className="approve">
-      <p className="muted">{held.agentName ?? "Your agent"} wants to pay</p>
-      <div className="amount">{formatUsd(held.amountMicro)}</div>
-      <div>
-        <span className="muted">To </span>
-        <span className="to" title={held.recipient}>{held.recipient.length > 40 ? shortAddr(held.recipient) : held.recipient}</span>
-      </div>
-
-      <section className="callout attention" aria-labelledby="why">
-        <strong id="why">Why we stopped it</strong>
-        <p>{held.reason}</p>
-        {held.flags.length > 0 && (
-          <ul className="flags">{held.flags.map((f) => <li key={f} className="badge warn">{f}</li>)}</ul>
+    <div className="pay">
+      <Link href="/" className="pay-back"><Icon name="back" size={16} />Back to overview</Link>
+      <div className="pay-card">
+        {open ? (
+          <div className="pay-head">
+            <Avatar recipient={held.recipient} />
+            <p className="muted"><b className="ink">{held.agentName ?? "Your agent"}</b> wants to pay</p>
+            <p className="pay-to mono" title={held.recipient}>{to}</p>
+            <div className="pay-amount">{amount}</div>
+            <span className="pill warn"><Icon name="clock" size={13} />Waiting for you · {fmtCountdown(remaining)}</span>
+          </div>
+        ) : (
+          <Result held={held} amount={amount} onArc={onArc} />
         )}
-      </section>
 
-      {open ? (
-        <>
-          <p>
-            If you do nothing, the money is refunded in <span className="countdown" role="timer">{fmtCountdown(remaining)}</span>.
+        <dl className="receipt">
+          <div><dt>To</dt><dd className="mono" title={held.recipient}>{to}</dd></div>
+          <div><dt>Amount</dt><dd>{amount} USDC</dd></div>
+          <div><dt>Requested</dt><dd>{new Date(held.createdAt).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" })}</dd></div>
+          <div><dt>Escrow</dt><dd>{escrowRow}</dd></div>
+          {resolveUrl && (
+            <div><dt>{held.status === "approved" ? "Released" : "Refund"}</dt><dd><a href={resolveUrl} target="_blank" rel="noreferrer" className="pay-link">View on Arc <Icon name="arrow" size={12} /></a></dd></div>
+          )}
+        </dl>
+
+        <section className="why" aria-labelledby="why">
+          <h2 id="why">Why it was held</h2>
+          <ul>
+            <li><Icon name="alert" size={15} /><span>{held.reason}</span></li>
+            {held.flags.map((f) => <li key={f}><Icon name="alert" size={15} /><span>{f}</span></li>)}
+          </ul>
+        </section>
+
+        {held.holdError && (
+          <p className="pay-note" role="status">
+            The vault on Arc couldn&apos;t take this payment: {held.holdError.replace(/\.$/, "")}. The money never left your treasury{open ? ", so it can only be cancelled" : ""}.
           </p>
-          <div className="actions">
+        )}
+
+        {open && (
+          <div className="pay-actions">
             <button className="btn attention block" onClick={deny} disabled={busy !== null}>
               {busy === "deny" ? "Cancelling…" : "Cancel payment"}
             </button>
-            <button className="btn secondary block" onClick={approve} disabled={busy !== null}>
+            <button className="btn secondary block" onClick={approve} disabled={busy !== null || Boolean(held.holdError)}>
               {busy === "approve" ? "Waiting for passkey…" : "Approve with passkey"}
             </button>
+            <p className="pay-fine">Refunded automatically if you do nothing. Approving always needs your passkey; a text reply can only cancel.</p>
           </div>
-          <p className="muted">Approving always needs your passkey. Replying YES by text never approves.</p>
-        </>
-      ) : (
-        <div className={`callout ${held.status === "approved" ? "info" : "attention"}`} role="status">
-          <strong>{held.status === "approved" ? "Approved" : "Closed"}</strong>
-          <p>{closedText[held.status] ?? closedText.held}</p>
-        </div>
-      )}
-      {msg && <p role="alert" style={{ color: "var(--orange)" }}>{msg}</p>}
-      {error && <ErrorState error={error} onRetry={load} />}
-      <VerifyLink href={txUrl(held.holdTx, held.holdTxUrl)}>verify the hold on Arc</VerifyLink>
+        )}
+        {msg && <p role="alert" className="warn-text">{msg}</p>}
+        {error && <ErrorState error={error} onRetry={load} />}
+      </div>
+    </div>
+  );
+}
+
+function Result({ held, amount, onArc }: { held: Held; amount: string; onArc: boolean }) {
+  const approved = held.status === "approved";
+  const title = approved ? "Payment sent" : held.status === "denied" ? "Payment cancelled" : "Payment refunded";
+  let detail: string;
+  if (approved) detail = `${amount} was released to the recipient.`;
+  else if (!onArc) detail = `${amount} never left your treasury.`;
+  else if (held.resolveTx) detail = `${amount} was returned to your treasury.`;
+  else detail = `${amount} is being returned to your treasury.`;
+  return (
+    <div className="pay-result" role="status">
+      <span className={`result-icon ${approved ? "ok" : ""}`}><Icon name={approved ? "check" : "undo"} size={22} /></span>
+      <h1>{title}</h1>
+      <p className="muted">{detail}</p>
     </div>
   );
 }

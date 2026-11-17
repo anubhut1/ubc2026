@@ -116,6 +116,8 @@ const PATHS: Record<string, ReactNode> = {
   lock: <><rect x="5" y="11" width="14" height="10" rx="2" /><path d="M8 11V8a4 4 0 0 1 8 0v3" /></>,
   alert: <><path d="M12 3 2 20h20z" /><path d="M12 10v4M12 17h.01" /></>,
   edit: <path d="M4 20h4L19 9l-4-4L4 16zM14 6l4 4" />,
+  back: <path d="M15 18l-6-6 6-6" />,
+  undo: <path d="M9 14 4 9l5-5M4 9h11a5 5 0 0 1 0 10h-3" />,
 };
 
 export function Icon({ name, size = 18 }: { name: string; size?: number }) {

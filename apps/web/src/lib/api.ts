@@ -37,6 +37,10 @@ export type HeldPayment = {
   status: "held" | "approved" | "denied" | "expired";
   holdTx: string | null;
   holdTxUrl: string | null;
+  /** Why the Arc escrow failed; null when it succeeded or Arc isn't configured. */
+  holdError?: string | null;
+  resolveTx?: string | null;
+  resolveTxUrl?: string | null;
 };
 
 export type RuleView = { ruleId: string; kind: string; sentence: string; enforcedBy: string };

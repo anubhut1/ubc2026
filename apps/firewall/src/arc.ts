@@ -26,6 +26,9 @@ const vaultAbi = parseAbi([
   "function refundExpired(bytes32 requestId)",
 ]);
 
+const vaultReadAbi = parseAbi(["function usdc() view returns (address)", "function treasury() view returns (address)"]);
+const erc20Abi = parseAbi(["function allowance(address owner, address spender) view returns (uint256)", "function balanceOf(address) view returns (uint256)"]);
+
 const publicClient = createPublicClient({ chain: arcTestnet, transport: http() });
 const service = config.arc.servicePrivateKey ? createWalletClient({ chain: arcTestnet, transport: http(), account: privateKeyToAccount(config.arc.servicePrivateKey) }) : null;
 const owner = config.arc.ownerPrivateKey ? createWalletClient({ chain: arcTestnet, transport: http(), account: privateKeyToAccount(config.arc.ownerPrivateKey) }) : null;
@@ -83,9 +86,28 @@ export function resolveRecipient(recipient: string): Hex | null {
   return a && /^0x[0-9a-fA-F]{40}$/.test(a) ? (a as Hex) : null;
 }
 
+/** How much USDC the vault may still pull from the treasury (hold() uses transferFrom), plus the treasury balance. 6-decimal micro units. */
+export async function vaultFunding(): Promise<{ treasury: Hex; allowanceMicro: number; balanceMicro: number } | null> {
+  if (!arcStatus().vault) return null;
+  const vault = config.arc.vaultAddress!;
+  const [usdc, treasury] = await Promise.all([
+    publicClient.readContract({ address: vault, abi: vaultReadAbi, functionName: "usdc" }),
+    publicClient.readContract({ address: vault, abi: vaultReadAbi, functionName: "treasury" }),
+  ]);
+  const [allowance, balance] = await Promise.all([
+    publicClient.readContract({ address: usdc, abi: erc20Abi, functionName: "allowance", args: [treasury, vault] }),
+    publicClient.readContract({ address: usdc, abi: erc20Abi, functionName: "balanceOf", args: [treasury] }),
+  ]);
+  return { treasury, allowanceMicro: Number(allowance), balanceMicro: Number(balance) };
+}
+
 export async function vaultHold(requestId: string, recipient: string, amountMicro: number, expiresAt: Date): Promise<Hex | null> {
   const to = resolveRecipient(recipient);
   if (!arcStatus().vault || !to) return null;
+  // Fail with a readable reason instead of an ERC20 revert (seen live: allowance ran out after earlier holds).
+  const f = await vaultFunding();
+  if (f && f.allowanceMicro < amountMicro) throw new Error(`Treasury allowance for the vault is too low (${f.allowanceMicro / 1e6} USDC left, need ${amountMicro / 1e6}).`);
+  if (f && f.balanceMicro < amountMicro) throw new Error(`Treasury balance is too low (${f.balanceMicro / 1e6} USDC, need ${amountMicro / 1e6}).`);
   return send(service, config.arc.vaultAddress!, vaultAbi, "hold", [idToBytes32(requestId), to, microToErc20(amountMicro), BigInt(Math.floor(expiresAt.getTime() / 1000))]);
 }
 

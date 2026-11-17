@@ -5,7 +5,7 @@ import { ensureAgent, type DB } from "./db";
 import { activePolicy, evaluateAndReserve, markFailed, markSettled, parsePaymentRequest, savePolicy, setPaused, spendState } from "./engine";
 import { compileRules } from "./compiler";
 import { defaultSamples, dryRun, type Sample } from "./dryrun";
-import { arcStatus, commitPolicyOnArc, logDecisionsOnArc } from "./arc";
+import { arcStatus, commitPolicyOnArc, logDecisionsOnArc, vaultFunding } from "./arc";
 import {
   approvalOptions,
   approveWithPasskey,
@@ -88,7 +88,17 @@ const ruleViews = (rules: Rule[]) => rules.map((r) => ({ ruleId: r.id, kind: r.k
 const policyView = (p: ReturnType<typeof activePolicy>) => p && { id: p.id, hash: p.hash, rules: p.rules, committedTx: p.committedTx, committedTxUrl: explorerTx(p.committedTx), createdAt: p.createdAt };
 
 // ---------- routes ----------
-route("GET", "/health", ({ db }) => ({ ok: true, signer: signerAddress(), arc: arcStatus(), twilio: smsConfigured(), llm: Boolean(config.llmApiKey), passkey: hasPasskey(db) }));
+route("GET", "/health", async ({ db }) => {
+  // Vault funding: hold() pulls from the treasury with transferFrom, so a spent allowance silently breaks escrow.
+  let vault: { allowanceUsdc: number; treasuryUsdc: number; low: boolean } | { error: string } | null = null;
+  try {
+    const f = await vaultFunding();
+    if (f) vault = { allowanceUsdc: f.allowanceMicro / 1e6, treasuryUsdc: f.balanceMicro / 1e6, low: Math.min(f.allowanceMicro, f.balanceMicro) < 5_000_000 };
+  } catch (e) {
+    vault = { error: e instanceof Error ? e.message.split("\n")[0]! : "unreadable" };
+  }
+  return { ok: true, signer: signerAddress(), arc: arcStatus(), vault, twilio: smsConfigured(), llm: Boolean(config.llmApiKey), passkey: hasPasskey(db) };
+});
 
 route("GET", "/v1/agents/:agentId/summary", ({ db, params }) => {
   const { agentId } = params as { agentId: string };

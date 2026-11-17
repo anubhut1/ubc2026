@@ -62,7 +62,8 @@ CREATE TABLE IF NOT EXISTS holds (
   hold_tx TEXT,
   resolve_tx TEXT,
   token_used INTEGER NOT NULL DEFAULT 0,
-  sms_sid TEXT
+  sms_sid TEXT,
+  hold_error TEXT                              -- why the Arc escrow failed (null = ok or not attempted)
 );
 CREATE TABLE IF NOT EXISTS passkeys (
   id TEXT PRIMARY KEY,
@@ -92,6 +93,7 @@ export function openDb(path: string): DB {
   const db = new DatabaseSync(path);
   db.exec("PRAGMA journal_mode = WAL; PRAGMA busy_timeout = 5000; PRAGMA foreign_keys = ON;");
   db.exec(SCHEMA);
+  try { db.exec("ALTER TABLE holds ADD COLUMN hold_error TEXT"); } catch { /* already there */ }
   return db;
 }
 

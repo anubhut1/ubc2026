@@ -9,7 +9,7 @@ import {
 import { config, explorerTx } from "./config";
 import { immediate, type DB } from "./db";
 import { hashToken } from "./engine";
-import { vaultApprove, vaultDeny, vaultHold, vaultRefundExpired } from "./arc";
+import { arcStatus, vaultApprove, vaultDeny, vaultHold, vaultRefundExpired } from "./arc";
 import { holdMessage, sendSms } from "./sms";
 import { activePolicy } from "./engine";
 
@@ -24,6 +24,8 @@ export interface HeldView {
   expiresAt: string;
   status: "held" | "approved" | "denied" | "expired";
   holdTx: string | null;
+  /** Why the Arc escrow failed; null when it succeeded or Arc isn't configured. */
+  holdError: string | null;
   holdTxUrl: string | null;
   resolveTx: string | null;
   resolveTxUrl: string | null;
@@ -45,6 +47,7 @@ function view(row: any, includeToken: boolean): HeldView {
     expiresAt: row.expires_at,
     status: row.status,
     holdTx: row.hold_tx,
+    holdError: row.hold_error ?? null,
     holdTxUrl: explorerTx(row.hold_tx),
     resolveTx: row.resolve_tx,
     resolveTxUrl: explorerTx(row.resolve_tx),
@@ -79,10 +82,25 @@ export async function onHold(db: DB, requestId: string, token: string, expiresAt
     tasks.push(sendSms(db, phone, body).then((sid) => sid && db.prepare("UPDATE holds SET sms_sid=? WHERE request_id=?").run(sid, requestId)));
   }
   tasks.push(
-    vaultHold(requestId, row.recipient, row.amount_micro, new Date(expiresAt)).then((tx) => tx && db.prepare("UPDATE holds SET hold_tx=? WHERE request_id=?").run(tx, requestId)),
+    vaultHold(requestId, row.recipient, row.amount_micro, new Date(expiresAt))
+      .then((tx) => tx && db.prepare("UPDATE holds SET hold_tx=?, hold_error=NULL WHERE request_id=?").run(tx, requestId))
+      .catch((e) => {
+        db.prepare("UPDATE holds SET hold_error=? WHERE request_id=?").run(shortError(e), requestId);
+        throw e;
+      }),
   );
   for (const r of await Promise.allSettled(tasks)) if (r.status === "rejected") console.error(`[hold ${requestId}]`, r.reason);
 }
+
+/** First line of a viem/contract error, without the stack and ABI dump. */
+function shortError(e: unknown): string {
+  const any = e as { shortMessage?: string; details?: string; message?: string };
+  const msg = any?.details ?? any?.shortMessage ?? any?.message ?? String(e);
+  return msg.replace(/^execution reverted:\s*/i, "").split("\n")[0]!.slice(0, 200);
+}
+
+const escrowed = (db: DB, requestId: string) =>
+  Boolean((db.prepare("SELECT hold_tx FROM holds WHERE request_id=?").get(requestId) as any)?.hold_tx);
 
 /** Atomically move a hold out of 'held'. Returns false if it was already resolved (double-click / race with expiry). */
 function transition(db: DB, requestId: string, to: "approved" | "denied" | "expired", requestStatus: string): boolean {
@@ -97,6 +115,7 @@ function transition(db: DB, requestId: string, to: "approved" | "denied" | "expi
 export async function denyHold(db: DB, requestId: string): Promise<{ ok: boolean; refundTx: string | null }> {
   if (!transition(db, requestId, "denied", "denied")) return { ok: false, refundTx: null };
   let tx: string | null = null;
+  if (!escrowed(db, requestId)) return { ok: true, refundTx: null }; // never reached Arc: nothing to refund
   try {
     tx = await vaultDeny(requestId);
   } catch (e) {
@@ -120,6 +139,7 @@ export async function expireHolds(db: DB) {
   const rows = db.prepare("SELECT request_id FROM holds WHERE status='held' AND expires_ms <= ?").all(Date.now()) as any[];
   for (const { request_id } of rows) {
     if (!transition(db, request_id, "expired", "expired")) continue;
+    if (!escrowed(db, request_id)) continue; // never reached Arc: nothing to refund
     try {
       const tx = await vaultRefundExpired(request_id);
       if (tx) db.prepare("UPDATE holds SET resolve_tx=? WHERE request_id=?").run(tx, request_id);
@@ -191,6 +211,7 @@ export async function approveWithPasskey(db: DB, token: string, assertion: any):
   const hold = holdByToken(db, token);
   if (!hold || hold.status !== "held") throw new Error("This payment is no longer waiting for approval.");
   if (Date.parse(hold.expiresAt) <= Date.now()) throw new Error("This approval link has expired. The money was refunded.");
+  if (arcStatus().vault && !hold.holdTx) throw new Error("This payment never reached the vault on Arc, so there is nothing to release. Cancel it instead.");
   const expectedChallenge = takeChallenge(db, `auth:${hashToken(token)}`);
   if (!expectedChallenge) throw new Error("Approval timed out. Try again.");
   const key = db.prepare("SELECT * FROM passkeys WHERE id=?").get(assertion?.id) as any;

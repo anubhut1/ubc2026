@@ -1,4 +1,5 @@
 "use client";
+import { PasskeySetup } from "@/passkey";
 import { useState } from "react";
 import { describeRule, usdToMicro, type Rule } from "@agent-firewall/policy";
 import {
@@ -129,6 +130,8 @@ export default function RulesPage() {
       </section>
 
       {error && <ErrorState error={error} />}
+
+      <PasskeySetup />
 
       {rules && (
         <>

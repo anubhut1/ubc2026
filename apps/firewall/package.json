@@ -7,17 +7,18 @@
     "dev": "tsx watch --env-file-if-exists=../../.env src/index.ts",
     "start": "tsx --env-file-if-exists=../../.env src/index.ts",
     "test": "vitest run",
-    "typecheck": "tsc -p ."
+    "typecheck": "tsc -p .",
+    "deposit": "tsx --env-file-if-exists=../../.env src/gateway-deposit.ts"
   },
   "dependencies": {
     "@agent-firewall/policy": "*",
     "@anthropic-ai/sdk": "1.9.0",
     "@simplewebauthn/server": "14.1.0",
     "viem": "2.57.20",
-    "zod": "4.6.7"
+    "zod": "4.6.7",
+    "@circle-fin/x402-batching": "2.0.4"
   },
   "devDependencies": {
-    "@circle-fin/x402-batching": "^2.0.4",
     "@types/node": "^22.19.0",
     "tsx": "4.23.15",
     "typescript": "^5.9.3",

@@ -56,9 +56,16 @@ export function Callout({ title, children, tone = "info" }: { title: string; chi
 }
 
 const OUTCOME_LABEL: Record<Outcome, string> = { allow: "Paid", hold: "Held for you", block: "Blocked" };
-export function OutcomeBadge({ outcome }: { outcome: Outcome }) {
+// What happened next matters more than the first decision (a hold can end cancelled, a reserved payment can fail).
+const STATUS_LABEL: Record<string, string> = {
+  reserved: "Paying", settled: "Paid", released: "Didn't go through", held: "Held for you",
+  approved: "You approved", denied: "You cancelled", expired: "Refunded (no reply)", blocked: "Blocked",
+};
+export function OutcomeBadge({ outcome, status }: { outcome: Outcome; status?: string }) {
   // blue = allowed, orange = needs attention / blocked. Text label always present (not color alone).
-  return <span className={`badge ${outcome === "allow" ? "ok" : "warn"}`}>{OUTCOME_LABEL[outcome]}</span>;
+  const label = (status && STATUS_LABEL[status]) ?? OUTCOME_LABEL[outcome];
+  const ok = status ? ["reserved", "settled", "approved"].includes(status) : outcome === "allow";
+  return <span className={`badge ${ok ? "ok" : "warn"}`}>{label}</span>;
 }
 
 export function VerifyLink({ href, children = "verify on Arc" }: { href: string | null | undefined; children?: ReactNode }) {

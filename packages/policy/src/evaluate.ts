@@ -134,7 +134,7 @@ function injectionFlags(rules: Rule[], req: PaymentRequest, opts: EvaluateOption
   for (const r of rules) if (r.kind === "allowlist") r.recipients.forEach((x) => known.add(norm(x)));
   const flags: string[] = [];
   const unknown = known.size > 0 && !known.has(norm(req.recipient));
-  if (unknown && req.sourceContext) flags.push(`Requested right after a seller response (${req.sourceContext}): possible injection.`);
+  if (unknown && req.sourceContext) flags.push(/^after\b/i.test(req.sourceContext) ? `Requested right ${req.sourceContext}: possible injection.` : `Requested right after a seller response (${req.sourceContext}): possible injection.`);
   if (unknown && /^0x[0-9a-f]{40}$/i.test(req.recipient)) flags.push("Raw wallet address, not a known service.");
   return flags;
 }

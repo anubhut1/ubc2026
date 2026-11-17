@@ -91,6 +91,7 @@ th { border-top: 0; color: var(--muted); font-weight: 600; font-size: .8rem; tex
 .approve .amount { font-family: var(--font-mono), monospace; font-size: 2.6rem; font-weight: 600; }
 .approve .to { font-family: var(--font-mono), monospace; word-break: break-all; font-size: .95rem; }
 .flags { display: flex; gap: 6px; flex-wrap: wrap; list-style: none; margin: 0; padding: 0; }
+.flags .badge { white-space: normal; max-width: 100%; height: auto; line-height: 1.35; padding-top: 3px; padding-bottom: 3px; text-align: left; }
 .countdown { font-family: var(--font-mono), monospace; font-weight: 600; color: var(--orange); }
 .actions { display: flex; flex-direction: column; gap: 10px; }
 .sr { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); }

@@ -36,7 +36,7 @@ export default function Activity() {
               {items.map((a) => (
                 <tr key={a.requestId}>
                   <td className="mono">{shortTime(a.at)}</td>
-                  <td><OutcomeBadge outcome={a.outcome} /></td>
+                  <td><OutcomeBadge outcome={a.outcome} status={a.status} /></td>
                   <td className="mono">{formatUsd(a.amountMicro)}</td>
                   <td className="mono" title={a.recipient}>{shortAddr(a.recipient)}</td>
                   <td>{a.ruleId ?? "—"}</td>
@@ -52,7 +52,7 @@ export default function Activity() {
         <Callout title="Two payments at once, one dollar left">
           If two requests arrive together and only one fits, we reserve the money for the first and block the second. They can&apos;t both slip through.
         </Callout>
-        <Callout tone="attention" title="A seller told the agent to send $50">
+        <Callout tone="attention" title="A seller told the agent to send $3">
           Text hidden in a seller&apos;s reply can try to hijack your agent. We never trust the agent&apos;s reasons. The payment is checked against your rules, held, and you decide.
         </Callout>
       </section>

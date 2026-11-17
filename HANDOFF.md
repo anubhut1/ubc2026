@@ -27,7 +27,7 @@ For how to run, the architecture and the honest safety limits, see `README.md`. 
 | Owner passkey (WebAuthn) enrollment + approve | `approvals.ts`, `apps/web/src/passkey.tsx`, `/a/[token]` | ⚠️ code done, **never tried on a real device** |
 | Arc adapter: commitPolicy, batched logDecisions, vault hold/deny/approve/refundExpired | `apps/firewall/src/arc.ts` | ✅ live on testnet except `approve` (needs passkey) and `refundExpired` |
 | Contracts `PolicyRegistry`, `ApprovalVault` + deploy script | `contracts/` | ✅ tested + **deployed to Arc testnet** |
-| Web: Home, Rules, Activity, approve page | `apps/web` | ⚠️ builds + typechecks; **not yet clicked through against a live backend** |
+| Web: Home, Rules, Activity, approve page | `apps/web` | ✅ clicked through against the live testnet backend (Home cards update live, Review → approve page → Cancel refunds onchain). Passkey approve still untested |
 | Demo sellers (Circle Gateway middleware or `MOCK_PAYMENTS=1`), one compromised endpoint | `apps/sellers` | ✅ mock **and live Gateway** |
 | Demo agent (no keys; normal / race / attack phases) | `apps/agent` | ✅ mock mode |
 | README with Safety limits | `README.md` | ✅ |
@@ -66,7 +66,7 @@ Operator commands: `npm run balance -w @agent-firewall/firewall`, `npm run depos
 
 ### Next up (in order)
 1. ~~Testnet bring-up~~ done (above).
-2. Click through the web app against a live firewall (`npm run dev:firewall` + `dev:web`) and fix any API mismatches.
+2. ~~Click through the web app~~ done. Remaining UI polish is optional.
 3. Twilio: verify team phones, set `FIREWALL_PUBLIC_URL` (e.g. via a tunnel) as the inbound webhook, and test a real NO reply.
 4. Passkey on a real phone: WebAuthn needs HTTPS or localhost; the RP ID must match the approve-page host.
 5. Record a backup video of `npm run demo:local` + web UI.

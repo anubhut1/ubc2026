@@ -20,6 +20,6 @@ STORY: The owner sees status, three cards (task spend, today, waiting for you), 
 
 FIRST VIEWPORT: Top nav (Home / Rules / Activity); agent name + status + Pause; three cards; "What your agent did" list.
 
-FORM: pinned by user, seed: none (pinned), "go back to the original design it was the best, minimal simplistic the original one".
+FORM: pinned by user: light fintech bento dashboard from the user's reference image (floating icon sidebar, big rounded white cards, colored hero card, rounded bar chart, faded cents), in Circle/Arc brand colors (see HANDOFF UI design). Earlier pin "minimal simplistic original" still governs restraint: no decoration beyond this.
 
 FINISH: unreviewed and undocumented is unfinished; this build ends with the finish review, the verdict, DESIGN.md, and every shipping raster carrying its provenance

@@ -12,14 +12,14 @@ User asked for: "cool, but easy to follow"; rejected the dark dashboard as "gene
 
 ## Direction contract
 
-THESIS: A firewall you'd want to show a friend: a bright, tactile, playful control room where only one thing is ever loud: the payment that needs you. Refuses the dark fintech dashboard and the grey KPI-card grid.
+THESIS: The firewall wears the UBC 2026 Hackathon's own visual language, so judges see a product from their world; only the payment that needs you is loud. Refuses the dark-neon fintech dashboard and the grey KPI grid.
 
-OWN-WORLD: Near-white ground (#FAFAFA) with a faint grid of rounded squares; ink #0A0A0A; Figtree 900 headings with one word in red; glossy tactile pill buttons (inset white highlight, soft drop, step on hover, press on click) in saturated blue #2563EB (do / allowed) and yellow #FACC15 (needs you); a solid red band #C8000A for blocked/danger; white cards, one 20px radius scale; approved sellers as glossy app-icon tiles; hand-drawn script notes (Caveat) with an ink arrow, used once per screen. No violet.
+OWN-WORLD: Slate-navy (#1A2A36) full-bleed hero with a dot grid; warm off-white body (#F4F3EF); slate ink (#293C4B); Inter Black two-tone headlines (white + orange #EC8644); orange glow pills, white pills, glass pills; floating dark rounded nav; slanted orange band listing your sellers and limits; round orange badge with "left today" set around its edge (only when nothing is held); cards in three tones (slate, white, steel #9AACBB). States: orange = needs you, slate blue = allowed, brick = blocked, grey = refunded, always with words.
 
-STORY: The owner sees the agent is fine at a glance, sees exactly what it bought, and if something is held, the page points at it and one big button takes them to decide.
+STORY: Owner sees in one glance whether the agent is fine or needs them, what's left, who it can pay, and what it bought; one orange button takes them to decide.
 
-FIRST VIEWPORT: Top bar (wordmark left, Home / Rules / Activity pills, Pause agent right). Left: huge "Your agent is *spending safely*" headline with live sub-line; two big money numbers (task, today) with chunky bars. Right: the guest-list tile grid of approved sellers + red "?" tile for the unknown address; when a payment is held, a yellow card with a hand-drawn arrow "this one needs you" and Review payment. Below: activity feed rows with seller tiles.
+FIRST VIEWPORT: Dark hero: huge two-tone status headline left, plain sentence, Review payment (orange) + Pause (glass) pills, meta line with Arc proof link; held-payment white card with orange top edge right (or "All clear" panel + round badge). Orange slanted rules band crosses into the light body.
 
-FORM: pinned by user reference, seed: none (pinned), "use this https://github.com/Leonxlnx/taste-skill, https://uizze.com/" (look from uizze.com; craft rules from taste-skill).
+FORM: pinned by user reference, seed: none (pinned), "can you make the design similar to this: https://www.universityblockchain.org/programs/hackathon ... in terms of design" (replaces the earlier uizze pin).
 
 FINISH: unreviewed and undocumented is unfinished; this build ends with the finish review, the verdict, DESIGN.md, and every shipping raster carrying its provenance

@@ -45,14 +45,14 @@ export function Shell({ children }: { children: ReactNode }) {
   );
 }
 
-const TILE_COLORS = ["#2563eb", "#c2410c", "#15803d", "#be185d", "#0f766e", "#0a0a0a"]; // all ≥4.5:1 with white
+const TILE_COLORS = ["#1a2a36", "#3f6f92", "#a94f14", "#2d4356", "#5b6b2f", "#475569"]; // all ≥4.5:1 with white
 const isAddress = (r: string) => /^0x[0-9a-fA-F]{6,}$/.test(r);
 /** A seller as a glossy app-icon tile. Unknown raw addresses are always a red "?" tile. */
 export function SellerTile({ recipient, size = "lg" }: { recipient: string; size?: "lg" | "sm" }) {
   const unknown = isAddress(recipient);
   let h = 0;
   for (const c of recipient) h = (h * 31 + c.charCodeAt(0)) >>> 0;
-  const bg = unknown ? "#c8000a" : TILE_COLORS[h % TILE_COLORS.length];
+  const bg = unknown ? "#a8382a" : TILE_COLORS[h % TILE_COLORS.length];
   const letters = unknown ? "?" : recipient.replace(/[^a-z0-9]/gi, "").slice(0, 2).toUpperCase();
   return <span className={`tile ${size === "sm" ? "sm" : ""}`} style={{ background: bg }} aria-hidden="true">{letters}</span>;
 }

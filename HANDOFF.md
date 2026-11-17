@@ -72,7 +72,7 @@ Operator commands: `npm run balance -w @agent-firewall/firewall`, `npm run depos
 5. Record a backup video of `npm run demo:local` + web UI.
 
 ### Known gaps / gotchas
-- **UI design:** the original minimal light design (off-white #F6F7F9, simple top nav, blue = allowed, orange = attention, Inter / Space Grotesk / JetBrains Mono). The team tried dark-dashboard, playful (uizze) and UBC-marketing restyles and rejected them all. Keep it minimal; don't restyle without asking.
+- **UI design:** the original minimal light design (off-white #F6F7F9, simple top nav, blue = allowed, orange = attention, Inter / Space Grotesk / JetBrains Mono). The team tried dark-dashboard, playful (uizze) and UBC-marketing restyles and rejected them all. Keep it minimal; don't restyle without asking. Layout: light left sidebar (nav, agent, network) and a fintech-style Overview (stats strip, transactions table with Arc tx, rules panel) on the original palette.
 - The Rules page quick test uses the agent's *current* spend, so after the attack scene the $3 sample shows Blocked (daily budget). Record the Rules scene first.
 - On a fresh DB, the agent is blocked until rules are saved (deny by default). Save rules on `/rules` first.
 - If `vaultApprove` fails after a passkey OK, the DB says "approved" but funds stay in the vault until `refundExpired`. Surface this in the UI if it shows up in testing.

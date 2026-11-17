@@ -184,7 +184,7 @@ function HourChart({ items, now }: { items: ActivityItem[]; now: number }) {
   const label = (t: number) => new Date(t).toLocaleTimeString([], { hour: "numeric" });
   return (
     <div className="chart" role="img" aria-label={`Payments per hour: ${buckets.map((b) => `${label(b.start)} ${b.paid} paid, ${b.stopped} stopped`).join("; ")}`}>
-      <div className="yaxis" aria-hidden="true">{ticks.map((t) => <span key={t}>{t}</span>)}</div>
+      <div className="yaxis" aria-hidden="true">{ticks.map((t) => <span key={t} style={{ bottom: `${(t / top) * 100}%` }}>{t}</span>)}</div>
       <div className="plot">
         {buckets.map((b) => (
           <div className="col" key={b.start} tabIndex={0} aria-hidden="true">

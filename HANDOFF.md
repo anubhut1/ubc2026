@@ -48,6 +48,7 @@ End to end against real Circle Gateway + our deployed contracts:
 - ✅ Policy hash committed to `PolicyRegistry` ([tx](https://explorer.testnet.arc.io/tx/0xa72414dfe452e11c01a3468abc168b79c7a6968cfcbe5d9448069fac078c0ab0)).
 - ✅ Decisions batch-logged to `PolicyRegistry` every 10s.
 - ✅ Race on live: one $0.80 allowed, one blocked.
+- ✅ Re-verified 2026-11-16 23:23: hold [tx](https://explorer.testnet.arc.io/tx/0x78edc769888bbe0e43463dfdb7dd23bc641825df8e507de34131f1ad05bb3f3d) → cancel → refund [tx](https://explorer.testnet.arc.io/tx/0x7ec12416c5f71327d06527aae618cb4619f9e02a07b47cad498743e2ef25c64a), vault back to 0.
 - ✅ Injection: $3 held in `ApprovalVault` ([hold tx](https://explorer.testnet.arc.io/tx/0x31e87d5828f3dd19a9184a33524adf6b50ab168a00b26628f67884c910b186c4)), cancelled, refunded ([refund tx](https://explorer.testnet.arc.io/tx/0x63625b8688439e0300c4465d87e5b0c0195571a92c81a8531b32ff83b8ee3e69)); vault balance 3 → 0.
 
 | Contract / wallet | Address |
@@ -73,6 +74,7 @@ Operator commands: `npm run balance -w @agent-firewall/firewall`, `npm run depos
 
 ### Known gaps / gotchas
 - **UI design (current, user-approved direction):** light fintech "bento" dashboard modeled on a reference the user picked, in **real Circle + Arc brand colors** pulled from circle.com / arc.network CSS: canvas Circle Licorice #F1F0F5, Arc Protocol Navy #1B3158 (hero card, active nav, primary buttons), Arc Validator Blue #2F578C, Arc Sky Sync #ACC6E9, Circle USDC Stable Blue #2775CA / #0B53BF = allowed, Arc Blockstream Gold #E9A13F (fills) / #A15C07 (text) = attention (color-blind safe, no red/green). Floating white left sidebar with icons, 24px rounded cards, pill buttons, Outfit headings + money (faded cents), Inter body, JetBrains Mono for hashes/times. Overview: daily-allowance navy card, task budget, payments-by-hour stacked chart (paid vs stopped, hatched), "kept from leaving", payment history, rules. Rejected earlier: dark dashboard, uizze playful, UBC marketing. Don't restyle without asking.
+- **Vault allowance runs out (found 2026-11-16 live test):** `ApprovalVault.hold` pulls USDC from the treasury with `transferFrom`, so the treasury must `approve` the vault. The setup allowance was used up by earlier holds, and the next hold reverted with "ERC20: transfer amount exceeds allowance". **The app still showed "Held" and later "Cancelled/Refunded" with no onchain tx** (no "verify on Arc" link). Fixed for now by approving 20 USDC (tx 0x550df44a…7d00). Check before demos: `cast call $USDC_ADDRESS 'allowance(address,address)(uint256)' $TREASURY $VAULT_ADDRESS`. TODO: report allowance in `/health`, and show "not recorded on Arc" on the approve page when `holdTx` is null.
 - The Rules page quick test uses the agent's *current* spend, so after the attack scene the $3 sample shows Blocked (daily budget). Record the Rules scene first.
 - On a fresh DB, the agent is blocked until rules are saved (deny by default). Save rules on `/rules` first.
 - If `vaultApprove` fails after a passkey OK, the DB says "approved" but funds stay in the vault until `refundExpired`. Surface this in the UI if it shows up in testing.

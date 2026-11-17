@@ -16,5 +16,11 @@
     "viem": "2.57.20",
     "zod": "4.6.7"
   },
-  "devDependencies": { "tsx": "4.23.15", "vitest": "^3.2.4", "typescript": "^5.9.3", "@types/node": "^22.19.0" }
+  "devDependencies": {
+    "@circle-fin/x402-batching": "^2.0.4",
+    "@types/node": "^22.19.0",
+    "tsx": "4.23.15",
+    "typescript": "^5.9.3",
+    "vitest": "^3.2.4"
+  }
 }

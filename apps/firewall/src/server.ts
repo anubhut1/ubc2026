@@ -19,6 +19,7 @@ import {
   registrationOptions,
 } from "./approvals";
 import { sendSms, smsConfigured, twiml, validTwilioSignature } from "./sms";
+import { SignError, signForRequest, signerAddress } from "./signer";
 
 class HttpError extends Error {
   constructor(public status: number, message: string) {
@@ -87,7 +88,7 @@ const ruleViews = (rules: Rule[]) => rules.map((r) => ({ ruleId: r.id, kind: r.k
 const policyView = (p: ReturnType<typeof activePolicy>) => p && { id: p.id, hash: p.hash, rules: p.rules, committedTx: p.committedTx, committedTxUrl: explorerTx(p.committedTx), createdAt: p.createdAt };
 
 // ---------- routes ----------
-route("GET", "/health", ({ db }) => ({ ok: true, arc: arcStatus(), twilio: smsConfigured(), llm: Boolean(config.llmApiKey), passkey: hasPasskey(db) }));
+route("GET", "/health", ({ db }) => ({ ok: true, signer: signerAddress(), arc: arcStatus(), twilio: smsConfigured(), llm: Boolean(config.llmApiKey), passkey: hasPasskey(db) }));
 
 route("GET", "/v1/agents/:agentId/summary", ({ db, params }) => {
   const { agentId } = params as { agentId: string };
@@ -194,6 +195,15 @@ route("POST", "/v1/payments/evaluate", async ({ db, body }) => {
   }
   // The agent never receives the approval token.
   return { ...res.decision, duplicate: res.duplicate, policyHash: res.policyHash };
+});
+route("GET", "/v1/signer", () => ({ address: signerAddress() }));
+route("POST", "/v1/payments/:requestId/sign", async ({ db, params, body }) => {
+  try {
+    return { signature: await signForRequest(db, params.requestId!, body?.typedData) };
+  } catch (e) {
+    if (e instanceof SignError) throw new HttpError(403, e.message);
+    throw e;
+  }
 });
 route("POST", "/v1/payments/:requestId/settled", ({ db, params, body }) => ({ ok: markSettled(db, params.requestId!, typeof body?.txHash === "string" ? body.txHash : undefined) }));
 route("POST", "/v1/payments/:requestId/failed", ({ db, params }) => ({ ok: markFailed(db, params.requestId!) }));

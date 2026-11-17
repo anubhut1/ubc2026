@@ -47,7 +47,8 @@ CREATE TABLE IF NOT EXISTS requests (
   created_ms INTEGER NOT NULL,
   settled_tx TEXT,
   arc_tx TEXT,
-  arc_logged INTEGER NOT NULL DEFAULT 0
+  arc_logged INTEGER NOT NULL DEFAULT 0,
+  signed_ms INTEGER                            -- set once when the firewall signs the x402 authorization
 );
 CREATE INDEX IF NOT EXISTS requests_agent_time ON requests(agent_id, created_ms);
 CREATE INDEX IF NOT EXISTS requests_task ON requests(agent_id, task_id);

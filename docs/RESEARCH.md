@@ -226,3 +226,30 @@ Even if (b) worked via the CLI, `circle services pay` signs and pays in one step
 - the buyer's Gateway balance is topped up from the treasury via `GatewayClient.depositFor` (x402-batching 2.0.4 typings), at most $5 per UTC day, with idle buyer-wallet USDC swept to the treasury.
 
 **Revisit when:** Circle supports testnet policies or ships an Agent Wallet SDK with a pluggable signer, or we demo on mainnet.
+
+---
+
+## Q10. Mainnet re-check (2026-11-17, branch `mainnet-agent-wallet`). Result: possible, with one design change
+
+Arc mainnet has been live since 2026-09-16 (https://www.arc.io/blog/arc-mainnet-goes-live-on-september-16-2026).
+
+| Check | Answer | Evidence |
+|---|---|---|
+| Agent Wallets on Arc mainnet | **Yes**, chain id `ARC` **H** | https://developers.circle.com/agent-stack/agent-wallets/supported-blockchains.md |
+| Spending policies on Arc mainnet | **Yes**, mainnet only. Commands: `circle wallet limit set --address --chain ARC --policy-type stablecoin --daily N` and `--rule-type recipient-allowlist --targets "[0xA,0xB]"`. Each change needs a second email OTP. "When no policy is set, a default limit of 100 USDC per month applies." **H** | https://developers.circle.com/agent-stack/agent-wallets/wallet-operations/custom-policies.md |
+| Policies cover x402 payments | **Stated for limits:** "Set USDC spending limits for outbound transfers and x402 payments." **Not stated** whether the recipient allowlist matches an x402 `payTo`. Test (c2) settles it. **M** | https://developers.circle.com/agent-stack/agent-wallets.md |
+| Gateway nanopayments on Arc mainnet | **Yes**, `SupportedChainName` `arc`, domain 26. "Gateway supports USDC nanopayments on all blockchains except Solana." **H** | https://developers.circle.com/gateway/references/supported-blockchains.md |
+| Agent Wallet pays x402 from code | **CLI only:** `circle services pay <url> --address --chain ARC --max-amount <usdc> [-q]`. No SDK. **H** | https://developers.circle.com/agent-stack/agent-nanopayments/operations/pay-for-service.md |
+| Firewall signs the authorization itself with the Agent Wallet | **No.** Agent wallets are SCAs ("Agent wallets must be Smart Contract Accounts (SCAs)", CLI reference, `gateway withdraw`). "Gateway Nanopayments ... isn't available through ERC-1271." `circle wallet sign typed-data` exists, but it would produce an SCA signature that nanopayments do not accept. **H** | https://developers.circle.com/gateway/references/erc-1271.md, https://developers.circle.com/agent-stack/circle-cli/command-reference.md |
+| Seller library supports Arc mainnet | **Not in our pinned 2.0.4** (testnets only). **3.5.0** has `arc` (chain id 5042, GatewayWallet `0x77777777Dcc4d5A8B6E418Fd04D8997ef11000eE`, default facilitator `https://gateway-api.circle.com`). Verified by reading the installed 3.5.0 package. **H** | `@circle-fin/x402-batching@3.5.0` `dist/client/index.mjs`, `dist/server/index.d.ts` |
+
+**Design change:** on mainnet the firewall cannot be a *signer*; it has to be a *payer*. In `circle-agent-wallet` mode, the firewall:
+1. evaluates and reserves as usual;
+2. fetches the seller's 402 itself and checks that `payTo` and amount match the reservation exactly;
+3. runs `circle services pay <url> --max-amount <reserved amount> -q` under its own OS session.
+
+The agent gets the response body and never touches the CLI session.
+
+Remaining gap: the seller could change `payTo` between step 2 and step 3. Circle's recipient allowlist is meant to cover that, if it applies to x402. Test (c2) checks it.
+
+**Credential note:** the CLI session lives under the firewall user's home (`~/.circle-cli`), and sessions last 28 days. The agent launcher now gives the agent its own empty HOME. A same-user process could still read the file directly, so Circle's policy is what bounds a leak ($5/day, allowlisted payees only).

@@ -308,3 +308,45 @@ Record a **backup video** of the MVP by Wed night.
 4. Can our service be the **only** signer, or does the agent hold signing ability?
 5. Are there real x402 sellers in Circle's marketplace we can use, or do we run our own (disclosed as demo sellers)?
 6. The passkey approval path: use Circle Wallets (user-controlled, passkey) for the owner, or WebAuthn plus an owner key held by our service? Prefer Circle's option if feasible.
+
+## 15. Mainnet Agent Wallet (branch `mainnet-agent-wallet`; `main` stays testnet-only)
+
+Why the design is a *payer*, not a *signer*: Agent Wallets are smart-contract accounts, and Gateway nanopayments don't accept ERC-1271 signatures. The only documented way to pay x402 from an Agent Wallet is `circle services pay`. See `docs/RESEARCH.md` Q10.
+
+**Setup (owner does every OTP step in their own terminal; never give an agent the inbox):**
+```bash
+npm install -g @circle-fin/cli@1.4.0
+circle wallet login you@example.com                # mainnet session (OTP); accept terms when asked
+circle wallet list --type agent                     # copy the ARC address → W
+W=0x...                                             # your Agent Wallet on Arc mainnet
+circle wallet fund --address $W --chain ARC --amount 10 --method crypto   # or send 10 USDC on Arc mainnet to $W
+circle wallet balance --address $W --chain ARC
+circle gateway deposit --amount 9 --address $W --chain ARC --method direct   # BEFORE the allowlist
+circle gateway balance --address $W --chain ARC
+circle wallet limit set --address $W --chain ARC --policy-type stablecoin --daily 5             # OTP
+circle wallet limit set --address $W --chain ARC --policy-type stablecoin \
+  --rule-type recipient-allowlist --targets "[0x61D04924230Effe51bD57879638ECe5d99Eebcc4]"     # OTP
+circle wallet limit --address $W --chain ARC        # verify both rules
+```
+Then put `W` in `.env.firewall.mainnet` as `CIRCLE_AGENT_WALLET_ADDRESS`.
+
+**Run:**
+- Mainnet seller: `npm run mainnet -w @agent-firewall/sellers` (port 4300).
+- Mainnet firewall: `npm run start:mainnet -w @agent-firewall/firewall` (port 4100, own DB).
+- Agent: `FIREWALL_URL=http://localhost:4100 SELLERS_URL=http://localhost:4300 bash scripts/run-agent.sh normal 1`.
+
+The demo seller's payee is the treasury address, so test payments are recoverable.
+
+**Tests:**
+| Test | How |
+|---|---|
+| (a) $0.02 succeeds | Agent `normal 1` against the mainnet stack |
+| (b) Firewall allows $6, Circle refuses | Set agent rules with no approval threshold and a task budget ≥ $6, then buy `/sportsfeed/bulk`. Expect activity "Blocked $6.00 … Circle wallet policy" |
+| (c) Transfer to a non-allowlisted address is refused by Circle | `circle wallet transfer 0x6e6C13010e65f070876Ec1C5aa59fB07B147b4e7 --amount 0.01 --token 0x3600000000000000000000000000000000000000 --address $W --chain ARC` (that is the owner address; we hold its key, so it's recoverable if Circle lets it through) |
+| (c2) x402 to a non-allowlisted payee | Same as (a), with the mainnet seller's `MAINNET_SELLER_ADDRESS` set to the owner address and the firewall's `SELLER_ADDRESSES` set to match |
+| (d) Testnet unchanged | `npx tsx scripts/stress-api.ts` against port 4000, unit tests, and a live `run-agent.sh all 3` |
+
+Unknowns, settled only by running the tests:
+- Circle's refusal wording. Anything matching /polic|limit|allowlist|exceed|…/ is logged as "Circle wallet policy", with the raw CLI message.
+- Whether the recipient allowlist matches an x402 `payTo`.
+- Whether the Gateway deposit counts against the daily limit.

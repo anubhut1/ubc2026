@@ -20,7 +20,8 @@ import {
   registrationOptions,
 } from "./approvals";
 import { sendSms, smsConfigured, twiml, validTwilioSignature } from "./sms";
-import { SignError, signForRequest, signerAddress } from "./signer";
+import { SignError, signForRequest } from "./signer";
+import { PAY_NETWORK, PayError, payWithCircle, payerAddress, paymentMode } from "./payer";
 
 class HttpError extends Error {
   constructor(public status: number, message: string) {
@@ -48,6 +49,7 @@ function sentence(r: any): string {
     case "released":
       return `Tried to buy ${what.charAt(0).toLowerCase() + what.slice(1)}, ${amt}, but the payment didn't go through (budget returned)`;
     case "unconfirmed":
+      if (typeof r.failure_reason === "string" && r.failure_reason.startsWith("Circle wallet policy")) return `Blocked ${amt} to ${to}: ${r.failure_reason}`;
       return `Payment for ${what.charAt(0).toLowerCase() + what.slice(1)}, ${amt}, failed after signing; still counted until the authorization expires`;
     case "blocked":
       return `Blocked ${amt} to ${to}: ${r.reason}`;
@@ -101,7 +103,7 @@ route("GET", "/health", async ({ db }) => {
     vault = { error: e instanceof Error ? e.message.split("\n")[0]! : "unreadable" };
   }
   const buyer = await fundingStatus(db).catch((e) => ({ enabled: true, error: e instanceof Error ? e.message.split("\n")[0]! : "unreadable" }));
-  return { ok: true, signer: signerAddress(), arc: arcStatus(), vault, buyer, twilio: smsConfigured(), llm: Boolean(config.llmApiKey), passkey: hasPasskey(db) };
+  return { ok: true, signer: payerAddress(), paymentMode, arc: arcStatus(), vault, buyer, twilio: smsConfigured(), llm: Boolean(config.llmApiKey), passkey: hasPasskey(db) };
 });
 
 route("GET", "/v1/agents/:agentId/summary", ({ db, params }) => {
@@ -210,7 +212,17 @@ route("POST", "/v1/payments/evaluate", async ({ db, body }) => {
   // The agent never receives the approval token.
   return { ...res.decision, duplicate: res.duplicate, policyHash: res.policyHash };
 });
-route("GET", "/v1/signer", () => ({ address: signerAddress() }));
+route("GET", "/v1/signer", () => ({ address: payerAddress(), mode: paymentMode, network: PAY_NETWORK }));
+// circle-agent-wallet mode: the firewall makes the paid request itself (see payer.ts).
+route("POST", "/v1/payments/:requestId/pay", async ({ db, params, body }) => {
+  if (typeof body?.url !== "string") throw new HttpError(400, "url is required");
+  try {
+    return await payWithCircle(db, params.requestId!, body.url);
+  } catch (e) {
+    if (e instanceof PayError) throw new HttpError(e.circlePolicy ? 402 : 403, e.message);
+    throw e;
+  }
+});
 route("POST", "/v1/payments/:requestId/sign", async ({ db, params, body }) => {
   try {
     return { signature: await signForRequest(db, params.requestId!, body?.typedData) };

@@ -6,13 +6,19 @@
   "scripts": {
     "dev": "tsx watch --env-file-if-exists=../../.env.sellers src/index.ts",
     "start": "tsx --env-file-if-exists=../../.env.sellers src/index.ts",
-    "typecheck": "tsc -p ."
+    "typecheck": "tsc -p .",
+    "mainnet": "tsx --env-file-if-exists=../../.env.sellers src/mainnet.ts"
   },
   "dependencies": {
     "@circle-fin/x402-batching": "2.0.4",
     "@x402/core": "2.6.0",
     "@x402/evm": "2.6.0",
-    "viem": "2.57.20"
+    "viem": "2.57.20",
+    "x402-batching-mainnet": "npm:@circle-fin/x402-batching@3.5.0"
   },
-  "devDependencies": { "tsx": "4.23.15", "typescript": "^5.9.3", "@types/node": "^22.19.0" }
+  "devDependencies": {
+    "@types/node": "^22.19.0",
+    "tsx": "4.23.15",
+    "typescript": "^5.9.3"
+  }
 }

@@ -80,16 +80,21 @@ Without an `LLM_API_KEY`, the compiler falls back to an offline parser that hand
 
 ## Safety limits (read this)
 
-What is actually enforced, and where:
+What is actually enforced, and where. There are two payment modes (`PAYMENT_MODE`):
+
+- **Testnet (`local-key`, default): firewall-only enforcement.** The firewall holds the buyer key and signs each Gateway authorization itself. Circle spending policies are mainnet-only, so nothing at Circle backs up our rules; the $5/day outer cap below is our own top-up job.
+- **Mainnet (`circle-agent-wallet`): Circle policy as an outer wall, plus the firewall.** The buyer is a Circle Agent Wallet with a Circle policy of $5/day and only our seller allowlisted. The firewall checks the seller's terms against the reservation, then pays with `circle services pay --max-amount <reserved>`. Even if our service is compromised, Circle refuses anything over the cap or to another address. The vault and registry stay on Arc testnet (not redeployed). See `docs/RESEARCH.md` Q10 and `HANDOFF.md`.
+
 
 | Protection | Enforced by | Trust assumption |
 |---|---|---|
 | All rules (budgets, limits, allowlist, categories, hours, rate limit, pause) | Firewall service (atomic `BEGIN IMMEDIATE` reservation) | You trust our service and its database |
-| Agent can't pay without approval | The firewall is the only x402 signer; the agent holds no key | The firewall host isn't compromised |
+| Agent can't pay without approval | Testnet: the firewall is the only x402 signer; the agent holds no key. Mainnet: only the firewall's OS user holds the Circle CLI session; the agent is started with a different, empty HOME | The firewall host isn't compromised. Mainnet: a same-user process could still read `~/.circle-cli`, and then Circle's policy is the only limit |
+| **Mainnet outer wall** | **Circle Agent Wallet policy:** daily transfer limit + recipient allowlist, set with `circle wallet limit set` (email OTP per change) | Circle's enforcement. Docs say limits cover "outbound transfers and x402 payments"; allowlist coverage of x402 payees is checked by test (c2) in `HANDOFF.md` |
 | Agent can't see any secret | The agent starts with a clean environment (`scripts/run-agent.sh`, `env -i` + allowlist) and refuses to run if it sees a key (exit 78). Secrets live only in `.env.firewall` | **Environment only.** On one laptop the agent runs as the same OS user and *could* read `.env.firewall` from disk. Real isolation needs a separate OS user or container |
 | Payee and amount can't be swapped after approval | Signer checks the EIP-712 message against the reservation; one signature per request | Typed-data shape as of `@circle-fin/x402-batching` 2.0.4 |
 | A failed payment can't be quietly re-settled | If a payment fails *after* signing, it stays counted ("unconfirmed") until the authorization expires (~9 days) | None beyond the firewall DB |
-| **Outer wall: daily cap on what the buyer can spend at all** | The buyer key only controls its Gateway balance, topped up from the treasury by at most **$5 per UTC day**; idle buyer-wallet USDC is swept to the treasury | The cap is enforced by *our* service's top-up job and the treasury key it holds, **not by Circle**. A compromised firewall host holds the treasury key too |
+| **Testnet outer wall: daily cap on what the buyer can spend at all** | The buyer key only controls its Gateway balance, topped up from the treasury by at most **$5 per UTC day**; idle buyer-wallet USDC is swept to the treasury | The cap is enforced by *our* service's top-up job and the treasury key it holds, **not by Circle**. A compromised firewall host holds the treasury key too |
 | Held money can't be released without you | `ApprovalVault.approve` is `onlyOwner` | **Hackathon shortcut:** the owner key is held by the service and used only after a WebAuthn check. A compromised service could release funds. The fix is a passkey-native owner wallet (Circle Modular Wallets), not yet done |
 | Held payment really is escrowed | `vaultHold` preflights the treasury allowance/balance; if the hold fails, the UI says "Not recorded on Arc" and cancel says "never left your treasury" | Treasury allowance must be topped up (`/health` → `vault.low`) |
 | Cancel by text | Twilio webhook signature + `deny()` callable by the service | Twilio and SIM security. Cancelling only ever refunds |

@@ -78,7 +78,7 @@ export default function Home() {
         <div className="stack">
           <div className="card">
             <div className="card-top">
-              <div><h2>Daily allowance</h2><span className="sub">Resets at midnight</span></div>
+              <h2>Daily allowance</h2>
               <Link className="round-link" href="/rules" aria-label="Change limits"><Icon name="arrow" size={16} /></Link>
             </div>
             <div className="hero">
@@ -88,11 +88,11 @@ export default function Home() {
                 {dayLeft !== null ? <Money micro={dayLeft} size="xl" /> : <span className="money xl">No cap</span>}
               </div>
               {today.capMicro !== null && <div className="hero-bar" aria-hidden="true"><span style={{ width: `${pct(today.spentMicro, today.capMicro)}%` }} /></div>}
-              <div className="row3"><span>{formatUsd(today.spentMicro)} used</span><span>cap {today.capMicro !== null ? formatUsd(today.capMicro) : "none"}</span></div>
+              <div className="row3"><span>{formatUsd(today.spentMicro)}{today.capMicro !== null ? ` of ${formatUsd(today.capMicro)}` : ""} used</span><span>resets {resetTime(now)}</span></div>
             </div>
           </div>
           <div className="card">
-            <span className="muted small">Spent on this task</span>
+            <div className="card-top"><h2>Task budget</h2></div>
             <div className="row">
               <span><Money micro={task.spentMicro} size="md" />{task.budgetMicro !== null && <span className="muted"> / {formatUsd(task.budgetMicro)}</span>}</span>
               {task.budgetMicro !== null && <span className="pill ok">{Math.round(pct(task.spentMicro, task.budgetMicro))}% used</span>}
@@ -112,12 +112,12 @@ export default function Home() {
         <div className="stack">
           <div className="card">
             <div className="card-top">
-              <div><h2>Kept from leaving</h2><span className="sub">Blocked, cancelled or refunded</span></div>
+              <h2>Stopped by firewall</h2>
               <Link className="round-link" href="/activity" aria-label="See stopped payments"><Icon name="arrow" size={16} /></Link>
             </div>
             <div className="row" style={{ marginTop: "auto" }}>
               <Money micro={keptMicro} size="lg" />
-              <span className="pill warn">{stopped.length} stopped</span>
+              <span className="pill warn">{stopped.length} {stopped.length === 1 ? "payment" : "payments"}</span>
             </div>
           </div>
           <div className={`card ${pending.length ? "attention" : ""}`}>
@@ -223,6 +223,13 @@ function TxRow({ a }: { a: ActivityItem }) {
       <td className="r hide-sm">{url ? <a className="mono" href={url} target="_blank" rel="noreferrer">{(a.arcTx ?? "").slice(0, 8)}…</a> : <span className="muted">pending</span>}</td>
     </tr>
   );
+}
+
+/** Daily budgets reset at 00:00 UTC (packages/policy periods.ts); show that moment in the viewer's time. */
+function resetTime(now: number) {
+  const d = new Date(now);
+  const next = Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate() + 1);
+  return new Date(next).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" }).replace(":00", "");
 }
 
 function fmtLeft(ms: number) {

@@ -79,6 +79,20 @@ function assertOwnsRequest(db: DB, who: Principal | null, requestId: string) {
   if (row?.agent_id !== who.agentId) throw new HttpError(403, "Unknown payment request for this agent.");
 }
 
+/**
+ * Emergency pause stops money that was already allowed, not just new requests: a reservation made before the pause
+ * can't be signed or paid while the agent is paused (it stays reserved, and counts, until the owner resumes).
+ * Checked by the request's own agent_id, so it holds for every caller, including legacy unauthenticated agents.
+ * /sign: this check and the signer's signed_ms claim run in the same tick (no await between them), so a pause
+ * can't slip in. /pay: payWithCircle (payer.ts) awaits the seller's 402 probe before its claim, so a pause landing
+ * during that probe (one HTTP round trip) doesn't stop that one payment. Closing it needs the claim itself to require
+ * an active agent, which is a payer.ts change.
+ */
+function assertAgentActive(db: DB, requestId: string) {
+  const row = db.prepare("SELECT a.status FROM requests r JOIN agents a ON a.id = r.agent_id WHERE r.request_id=?").get(requestId) as { status: string } | undefined;
+  if (row?.status === "paused") throw new HttpError(403, "This agent is paused. The owner must resume it before this payment can go through.");
+}
+
 // ---------- views ----------
 function sentence(r: any): string {
   const amt = formatUsd(r.amount_micro);
@@ -333,6 +347,7 @@ route("GET", "/v1/signer", "public", () => ({ address: payerAddress(), mode: pay
 // circle-agent-wallet mode: the firewall makes the paid request itself (see payer.ts).
 route("POST", "/v1/payments/:requestId/pay", "agent", async ({ db, params, body, who }) => {
   assertOwnsRequest(db, who, params.requestId!);
+  assertAgentActive(db, params.requestId!);
   if (typeof body?.url !== "string") throw new HttpError(400, "url is required");
   try {
     return await payWithCircle(db, params.requestId!, body.url);
@@ -343,6 +358,7 @@ route("POST", "/v1/payments/:requestId/pay", "agent", async ({ db, params, body,
 });
 route("POST", "/v1/payments/:requestId/sign", "agent", async ({ db, params, body, who }) => {
   assertOwnsRequest(db, who, params.requestId!);
+  assertAgentActive(db, params.requestId!);
   try {
     return { signature: await signForRequest(db, params.requestId!, body?.typedData) };
   } catch (e) {

@@ -166,6 +166,44 @@ describe("agent routes", () => {
     expect(row(id).status).toBe("settled");
   });
 
+  it("B1. a payment reserved before an emergency pause can't be signed until the owner resumes", async () => {
+    // Sign over HTTP with the real BatchEvmScheme, as the demo agent does.
+    const sign = async (id: string) => {
+      const signer = (await call("GET", "/v1/signer")).json;
+      const scheme = new BatchEvmScheme({
+        address: signer.address,
+        signTypedData: async (td) => {
+          const r = await call("POST", `/v1/payments/${id}/sign`, ALICE, { typedData: JSON.parse(JSON.stringify(td, (_, x) => (typeof x === "bigint" ? x.toString() : x))) });
+          if (r.status !== 200) throw new Error(`${r.status} ${r.json.error}`);
+          return r.json.signature;
+        },
+      });
+      await scheme.createPaymentPayload(2, {
+        scheme: "exact", network: "eip155:5042002", asset: "0x3600000000000000000000000000000000000000", amount: "20000", payTo: SELLER, maxTimeoutSeconds: 8 * 24 * 3600,
+        extra: { name: "GatewayWalletBatched", version: "1", verifyingContract: "0x0077777d7EBA4688BDeF3E311b846F25870A19B9" },
+      } as any);
+    };
+    const id = `req_pause_${Date.now()}`;
+    expect((await evaluate(ALICE, "research-agent", id)).json.outcome).toBe("allow");
+    expect((await call("POST", "/v1/agents/research-agent/pause", OWNER, {})).status).toBe(200);
+
+    await expect(sign(id)).rejects.toThrow(/^403 This agent is paused/);
+    expect(row(id)).toEqual({ status: "reserved", signed_ms: null }); // still counted, never signed
+
+    // The agent can't lift the pause: not with its own token, another agent's, the service token, or none.
+    for (const t of [ALICE, BOB, SERVICE, undefined]) expect((await call("POST", "/v1/agents/research-agent/resume", t, {})).status).not.toBe(200);
+    expect((await call("GET", "/v1/agents/research-agent/summary", OWNER)).json.agent.status).toBe("paused");
+    // New requests are blocked while paused (unchanged behavior).
+    expect((await evaluate(ALICE, "research-agent", `req_pause_new_${Date.now()}`)).json).toMatchObject({ outcome: "block", ruleId: "paused" });
+    expect(row(id).signed_ms).toBeNull();
+
+    // Only the owner resumes; then the same reservation can be signed, exactly once.
+    expect((await call("POST", "/v1/agents/research-agent/resume", OWNER, {})).status).toBe(200);
+    await sign(id);
+    expect(row(id).signed_ms).not.toBeNull();
+    await expect(sign(id)).rejects.toThrow(/already signed/);
+  });
+
   it("3. an agent cannot impersonate another agent", async () => {
     const r = await evaluate(ALICE, "race-agent", `req_imp_${Date.now()}`);
     expect(r.status).toBe(403);

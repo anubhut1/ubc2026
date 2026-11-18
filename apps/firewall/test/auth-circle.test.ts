@@ -12,7 +12,9 @@ import { generatePrivateKey, privateKeyToAccount } from "viem/accounts";
 const SELLER_ADDR = privateKeyToAccount(generatePrivateKey()).address;
 // A seller whose 402 probe is slow, so a concurrent agent call lands while /pay is mid-flight.
 let releaseProbe: () => void = () => {};
+let probes = 0;
 const seller: Server = createServer((_req, res) => {
+  probes++;
   const required = { x402Version: 2, accepts: [{ network: "eip155:5042002", amount: "20000", payTo: SELLER_ADDR, extra: { name: "GatewayWalletBatched" } }] };
   const send = () => res.writeHead(402, { "PAYMENT-REQUIRED": Buffer.from(JSON.stringify(required)).toString("base64") }).end();
   new Promise<void>((r) => (releaseProbe = r)).then(send);
@@ -82,6 +84,30 @@ describe("circle-agent-wallet mode", () => {
     expect(row(id).signed_ms).not.toBeNull();
     // Settled can't be rewritten by the agent either.
     expect((await call("POST", `/v1/payments/${id}/settled`, ALICE, {})).status).toBe(403);
+  });
+
+  it("B1. a payment reserved before an emergency pause isn't paid until the owner resumes", async () => {
+    const id = `req_pause_${Date.now()}`;
+    expect((await evaluate(id)).json.outcome).toBe("allow");
+    expect((await call("POST", "/v1/agents/research-agent/pause", OWNER, {})).status).toBe(200);
+    const before = probes;
+    // Without the check, /pay would wait on the seller probe; bound it so a regression fails instead of hanging.
+    const paid = await Promise.race([
+      call("POST", `/v1/payments/${id}/pay`, ALICE, { url: `${SELLER_URL}/sportsfeed/injuries` }),
+      new Promise<{ status: number; json: any }>((r) => setTimeout(() => r({ status: -1, json: null }), 1000)),
+    ]);
+    expect(paid.status).toBe(403);
+    expect(paid.json.error).toMatch(/paused/);
+    expect(probes).toBe(before); // refused before the firewall contacted the seller, let alone ran the CLI
+    expect(row(id)).toEqual({ status: "reserved", signed_ms: null });
+    expect((await call("POST", "/v1/agents/research-agent/resume", ALICE, {})).status).toBe(403);
+
+    expect((await call("POST", "/v1/agents/research-agent/resume", OWNER, {})).status).toBe(200);
+    const pay = call("POST", `/v1/payments/${id}/pay`, ALICE, { url: `${SELLER_URL}/sportsfeed/injuries` });
+    await new Promise((r) => setTimeout(r, 100));
+    releaseProbe();
+    expect((await pay).status).toBe(200);
+    expect(row(id).status).toBe("settled");
   });
 
   it("the service token may still report outcomes", async () => {

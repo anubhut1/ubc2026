@@ -1,5 +1,6 @@
 // Live stress checks against a running firewall (no money moves: nothing here is signed or settled).
-//   npx tsx scripts/stress-api.ts            (FIREWALL_URL defaults to http://localhost:4000)
+//   FIREWALL_OWNER_TOKEN=… FIREWALL_AGENT_TOKEN=… npx tsx scripts/stress-api.ts   (FIREWALL_URL defaults to http://localhost:4000)
+//   FIREWALL_AGENT_TOKEN must be the token for STRESS_AGENT_ID (default "stress-agent") in the firewall's FIREWALL_AGENT_TOKENS.
 // 1. Race: 20 concurrent $0.80 requests with $1.00 of task budget -> exactly 1 allowed, never over budget.
 // 2. Idempotency: the same requestId evaluated 10x concurrently -> one reservation.
 // 3. Failure before signing: markFailed releases the reservation.
@@ -7,21 +8,26 @@
 import { randomUUID } from "node:crypto";
 
 const FW = process.env.FIREWALL_URL ?? "http://localhost:4000";
-const post = async (path: string, body: unknown) => {
-  const r = await fetch(FW + path, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
+const bearer = (t: string | undefined): Record<string, string> => (t ? { Authorization: `Bearer ${t}` } : {});
+const OWNER = bearer(process.env.FIREWALL_OWNER_TOKEN);
+const AGENT = bearer(process.env.FIREWALL_AGENT_TOKEN);
+const post = async (path: string, body: unknown, auth = AGENT) => {
+  const r = await fetch(FW + path, { method: "POST", headers: { "Content-Type": "application/json", ...auth }, body: JSON.stringify(body) });
   return { status: r.status, body: (await r.json()) as any };
 };
-const get = async (path: string) => (await (await fetch(FW + path)).json()) as any;
+const get = async (path: string) => (await (await fetch(FW + path, { headers: OWNER })).json()) as any;
 
 const results: { test: string; pass: boolean; detail: string }[] = [];
 const check = (test: string, pass: boolean, detail: string) => results.push({ test, pass, detail });
 
-const agentId = `stress-${Date.now().toString(36)}`;
-const taskId = "t1";
-await post("/v1/policy", {
+// A token is bound to one agent id, so the agent is fixed; a fresh task per run gives a full task budget.
+const agentId = process.env.STRESS_AGENT_ID ?? "stress-agent";
+const taskId = `t-${Date.now().toString(36)}`;
+const saved = await post("/v1/policy", {
   agentId, confirmed: true,
   rules: [{ id: "task-budget", kind: "taskBudget", taskId: "*", maxMicro: 1_000_000 }, { id: "approved-recipients", kind: "allowlist", recipients: ["oddsapi"] }],
-});
+}, OWNER);
+if (saved.status !== 200) throw new Error(`Saving rules failed (HTTP ${saved.status}: ${saved.body.error}). Set FIREWALL_OWNER_TOKEN.`);
 const req = (id: string, amountMicro: number) => ({ requestId: id, agentId, taskId, recipient: "oddsapi", amountMicro, category: "data", purpose: "stress" });
 
 // 1. Race

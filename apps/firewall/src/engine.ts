@@ -11,6 +11,7 @@ import {
   type SpendState,
 } from "@agent-firewall/policy";
 import { ensureAgent, immediate, SPENDING_SQL, type DB } from "./db";
+import { anomalyConfig, detectAnomalies, type AnomalyConfig } from "./anomaly";
 
 export interface ActivePolicy {
   id: string;
@@ -77,7 +78,7 @@ export function parsePaymentRequest(body: any): PaymentRequest {
  * two $0.80 requests against $1.00 of budget serialize on BEGIN IMMEDIATE, so the
  * second one sees the first one's reservation and is blocked.
  */
-export function evaluateAndReserve(db: DB, req: PaymentRequest, opts: { now?: Date; holdMinutes?: number; devMode?: boolean } = {}): EvaluateResult {
+export function evaluateAndReserve(db: DB, req: PaymentRequest, opts: { now?: Date; holdMinutes?: number; devMode?: boolean; anomaly?: AnomalyConfig } = {}): EvaluateResult {
   const now = opts.now ?? new Date();
   ensureAgent(db, req.agentId);
   return immediate(db, () => {
@@ -93,6 +94,7 @@ export function evaluateAndReserve(db: DB, req: PaymentRequest, opts: { now?: Da
           violations: JSON.parse(existing.violations_json),
           triggerPause: false,
           flags: JSON.parse(existing.flags_json),
+          anomalies: JSON.parse(existing.anomalies_json ?? "[]"),
           at: existing.created_at,
         },
         policyHash: existing.policy_hash,
@@ -104,9 +106,11 @@ export function evaluateAndReserve(db: DB, req: PaymentRequest, opts: { now?: Da
     // No policy = deny by default. An agent with no rules can't spend.
     const rules: Rule[] = policy ? policy.rules : [];
     const state = spendState(db, req.agentId, req.taskId, now);
+    // Same transaction, before this request's row exists: it never counts in its own baseline.
+    const anomalies = detectAnomalies(db, req, rules, state, now, opts.anomaly ?? anomalyConfig);
     let decision: Decision = policy
-      ? evaluate(rules, req, state, { now })
-      : { requestId: req.requestId, outcome: "block", ruleId: "no-policy", reason: "No rules saved yet. Set rules before the agent can spend.", violations: [], triggerPause: false, flags: [], at: now.toISOString() };
+      ? evaluate(rules, req, { ...state, anomalies }, { now })
+      : { requestId: req.requestId, outcome: "block", ruleId: "no-policy", reason: "No rules saved yet. Set rules before the agent can spend.", violations: [], triggerPause: false, flags: [], anomalies, at: now.toISOString() };
 
     if (decision.triggerPause) {
       db.prepare("UPDATE agents SET status='paused', paused_reason=? WHERE id=?").run(decision.reason, req.agentId);
@@ -114,12 +118,12 @@ export function evaluateAndReserve(db: DB, req: PaymentRequest, opts: { now?: Da
 
     const status = decision.outcome === "allow" ? "reserved" : decision.outcome === "hold" ? "held" : "blocked";
     db.prepare(
-      `INSERT INTO requests (request_id, agent_id, task_id, recipient, amount_micro, category, purpose, source_context, outcome, status, rule_id, reason, flags_json, violations_json, policy_hash, created_at, created_ms)
-       VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+      `INSERT INTO requests (request_id, agent_id, task_id, recipient, amount_micro, category, purpose, source_context, outcome, status, rule_id, reason, flags_json, violations_json, policy_hash, created_at, created_ms, anomalies_json)
+       VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
     ).run(
       req.requestId, req.agentId, req.taskId, req.recipient, req.amountMicro, req.category, req.purpose, req.sourceContext ?? null,
       decision.outcome, status, decision.ruleId ?? null, decision.reason, JSON.stringify(decision.flags), JSON.stringify(decision.violations),
-      policy?.hash ?? null, now.toISOString(), now.getTime(),
+      policy?.hash ?? null, now.toISOString(), now.getTime(), JSON.stringify(decision.anomalies),
     );
     db.prepare("UPDATE agents SET current_task=? WHERE id=?").run(req.taskId, req.agentId);
 

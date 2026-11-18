@@ -103,6 +103,12 @@ export function openDb(path: string): DB {
   db.exec(SCHEMA);
   try { db.exec("ALTER TABLE holds ADD COLUMN hold_error TEXT"); } catch { /* already there */ }
   try { db.exec("ALTER TABLE requests ADD COLUMN failure_reason TEXT"); } catch { /* already there */ }
+  // Anomaly signals measured for each request (anomaly.ts). Old rows read as "no signals".
+  try { db.exec("ALTER TABLE requests ADD COLUMN anomalies_json TEXT NOT NULL DEFAULT '[]'"); } catch { /* already there */ }
+  db.exec(`
+    CREATE INDEX IF NOT EXISTS requests_agent_recipient ON requests(agent_id, lower(recipient));
+    CREATE INDEX IF NOT EXISTS requests_agent_anomalous ON requests(agent_id, created_ms) WHERE anomalies_json <> '[]';
+  `);
   return db;
 }
 

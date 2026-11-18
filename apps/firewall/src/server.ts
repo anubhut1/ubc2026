@@ -1,5 +1,5 @@
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
-import { describeRule, enforcedBy, formatUsd, policyHash, shortRecipient, validateRules, type Rule } from "@agent-firewall/policy";
+import { describeRule, enforcedBy, formatUsd, policyHash, shortRecipient, validateRules, type AnomalySignal, type Rule, type Violation } from "@agent-firewall/policy";
 import { config, explorerTx } from "./config";
 import { ensureAgent, type DB } from "./db";
 import { activePolicy, evaluateAndReserve, markFailed, markSettled, parsePaymentRequest, savePolicy, setPaused, spendState } from "./engine";
@@ -22,6 +22,8 @@ import {
 import { sendSms, smsConfigured, twiml, validTwilioSignature } from "./sms";
 import { SignError, signForRequest } from "./signer";
 import { PAY_NETWORK, PayError, network, payWithCircle, payerAddress, paymentMode } from "./payer";
+import { authConfig, authenticate, authSummary, type AuthConfig, type Principal } from "./auth";
+import { activityFilter, hourlySeries, listAgents, todayTotals } from "./overview";
 
 class HttpError extends Error {
   constructor(public status: number, message: string) {
@@ -29,13 +31,53 @@ class HttpError extends Error {
   }
 }
 
-type Handler = (ctx: { db: DB; req: IncomingMessage; params: Record<string, string>; query: URLSearchParams; body: any; raw: string }) => Promise<unknown> | unknown;
-const routes: { method: string; re: RegExp; keys: string[]; handler: Handler }[] = [];
-const route = (method: string, path: string, handler: Handler) => {
+/**
+ * Who may call a route (enforced in createApp before the handler runs):
+ *   public        anyone; must not reveal anything sensitive
+ *   owner         FIREWALL_OWNER_TOKEN only (the dashboard's server-side proxy)
+ *   agent         an agent token; handlers check the agent owns the body agentId / payment row
+ *   ownerOrAgent  owner, or an agent reading its own data
+ *   settlement    the agent that owns the payment, or FIREWALL_SERVICE_TOKEN
+ *   approvalLink  anyone holding the unguessable hold token from the SMS link (approving still needs the passkey)
+ *   webhook       Twilio; verified by its request signature inside the handler
+ */
+type Access = "public" | "owner" | "agent" | "ownerOrAgent" | "settlement" | "approvalLink" | "webhook";
+type Handler = (ctx: { db: DB; req: IncomingMessage; params: Record<string, string>; query: URLSearchParams; body: any; raw: string; who: Principal | null; auth: AuthConfig }) => Promise<unknown> | unknown;
+const routes: { method: string; re: RegExp; keys: string[]; access: Access; handler: Handler }[] = [];
+const route = (method: string, path: string, access: Access, handler: Handler) => {
   const keys: string[] = [];
   const re = new RegExp("^" + path.replace(/:(\w+)/g, (_, k) => (keys.push(k), "([^/]+)")) + "$");
-  routes.push({ method, re, keys, handler });
+  routes.push({ method, re, keys, access, handler });
 };
+
+const ROLES: Partial<Record<Access, Principal["kind"][]>> = {
+  owner: ["owner"],
+  agent: ["agent"],
+  ownerOrAgent: ["owner", "agent"],
+  settlement: ["agent", "service"],
+};
+
+/** Returns null when the caller may proceed, else the HTTP error to send. `who` null = no credential (legacy agents only). */
+function authorize(access: Access, who: Principal | null | "invalid", auth: AuthConfig): HttpError | null {
+  const roles = ROLES[access];
+  if (!roles) return null;
+  if (access === "owner" && !auth.owner) return new HttpError(503, "Owner access isn't configured on the firewall (FIREWALL_OWNER_TOKEN).");
+  if (who === "invalid") return new HttpError(401, "Invalid credentials.");
+  if (who === null) return access !== "owner" && auth.allowUnauthenticatedAgents ? null : new HttpError(401, "Authentication required.");
+  return roles.includes(who.kind) ? null : new HttpError(403, "These credentials can't do that.");
+}
+
+/** An agent may only act for itself. Owner and service pass; legacy unauthenticated agents act as whoever they claim. */
+function assertActsFor(who: Principal | null, agentId: string) {
+  if (who?.kind === "agent" && who.agentId !== agentId) throw new HttpError(403, "This credential can't act for another agent.");
+}
+
+/** Payment routes identify a request only by id: check it belongs to the calling agent. Same answer for "missing" and "someone else's". */
+function assertOwnsRequest(db: DB, who: Principal | null, requestId: string) {
+  if (who?.kind !== "agent") return;
+  const row = db.prepare("SELECT agent_id FROM requests WHERE request_id=?").get(requestId) as { agent_id: string } | undefined;
+  if (row?.agent_id !== who.agentId) throw new HttpError(403, "Unknown payment request for this agent.");
+}
 
 // ---------- views ----------
 function sentence(r: any): string {
@@ -69,6 +111,7 @@ function sentence(r: any): string {
 function activityItem(r: any) {
   return {
     requestId: r.request_id,
+    agentId: r.agent_id,
     at: r.created_at,
     outcome: r.outcome,
     status: r.status,
@@ -81,6 +124,7 @@ function activityItem(r: any) {
     sentence: sentence(r),
     purpose: r.purpose,
     flags: JSON.parse(r.flags_json),
+    anomalies: JSON.parse(r.anomalies_json ?? "[]"),
     arcTx: r.hold_tx ?? r.arc_tx ?? null,
     arcTxUrl: explorerTx(r.hold_tx ?? r.arc_tx),
     resolveTx: r.resolve_tx ?? null,
@@ -88,12 +132,34 @@ function activityItem(r: any) {
   };
 }
 
+// An agent never sees anomaly measurements: not the signals, and not an anomalyGuard reason built from their
+// explanations ("$2.50 is 25× this agent's typical $0.10"). Either would show a hijacked agent how to stay just under
+// each baseline. The owner sees both; the response shape is unchanged.
+const ANOMALY_REASON = "Unusual activity for this agent. The owner can see the details.";
+function redactAnomalies<T extends { ruleId?: string | null; reason: string; violations: Violation[] }>(d: T): T {
+  const guards = new Set(d.violations.filter((v) => v.kind === "anomalyGuard").map((v) => v.ruleId));
+  if (!guards.size) return d;
+  return {
+    ...d,
+    reason: d.ruleId && guards.has(d.ruleId) ? ANOMALY_REASON : d.reason,
+    violations: d.violations.map((v) => (v.kind === "anomalyGuard" ? { ...v, reason: ANOMALY_REASON } : v)),
+  };
+}
+const redactRow = (r: any): string => redactAnomalies({ ruleId: r.rule_id, reason: r.reason, violations: JSON.parse(r.violations_json ?? "[]") }).reason;
+const agentActivityItem = (r: any) => activityItem({ ...r, reason: redactRow(r), anomalies_json: "[]" });
+function agentReason(db: DB, requestId: string, reason: string): string {
+  const r = db.prepare("SELECT rule_id, reason, violations_json FROM requests WHERE request_id=?").get(requestId);
+  return r ? redactRow(r) : reason;
+}
+
 const ACTIVITY_SQL = `SELECT r.*, h.hold_tx, h.resolve_tx FROM requests r LEFT JOIN holds h ON h.request_id = r.request_id`;
 const ruleViews = (rules: Rule[]) => rules.map((r) => ({ ruleId: r.id, kind: r.kind, sentence: describeRule(r), enforcedBy: enforcedBy(r) }));
 const policyView = (p: ReturnType<typeof activePolicy>) => p && { id: p.id, hash: p.hash, rules: p.rules, committedTx: p.committedTx, committedTxUrl: explorerTx(p.committedTx), createdAt: p.createdAt };
 
 // ---------- routes ----------
-route("GET", "/health", async ({ db }) => {
+route("GET", "/health", "public", async ({ db, who, auth }) => {
+  // Liveness for anyone; balances, payer and integration details only for the owner.
+  if (who?.kind !== "owner") return { ok: true };
   // Vault funding: hold() pulls from the treasury with transferFrom, so a spent allowance silently breaks escrow.
   let vault: { allowanceUsdc: number; treasuryUsdc: number; low: boolean } | { error: string } | null = null;
   try {
@@ -103,73 +169,119 @@ route("GET", "/health", async ({ db }) => {
     vault = { error: e instanceof Error ? e.message.split("\n")[0]! : "unreadable" };
   }
   const buyer = await fundingStatus(db).catch((e) => ({ enabled: true, error: e instanceof Error ? e.message.split("\n")[0]! : "unreadable" }));
-  return { ok: true, signer: payerAddress(), paymentMode, network, arc: arcStatus(), vault, buyer, twilio: smsConfigured(), llm: Boolean(config.llmApiKey), passkey: hasPasskey(db) };
+  return { ok: true, signer: payerAddress(), paymentMode, network, arc: arcStatus(), vault, buyer, twilio: smsConfigured(), llm: Boolean(config.llmApiKey), passkey: hasPasskey(db), auth: authSummary(auth) };
 });
 
-route("GET", "/v1/agents/:agentId/summary", ({ db, params }) => {
+route("GET", "/v1/agents/:agentId/summary", "ownerOrAgent", ({ db, params, who }) => {
   const { agentId } = params as { agentId: string };
-  ensureAgent(db, agentId, agentId === "research-agent" ? "research agent" : agentId);
-  const agent = db.prepare("SELECT * FROM agents WHERE id=?").get(agentId) as any;
+  assertActsFor(who, agentId);
+  const forOwner = who?.kind === "owner";
+  // Viewing an agent never registers it (agents appear when they first pay, get rules, or are registered).
+  const agent = requireAgent(db, agentId);
   const policy = activePolicy(db, agentId);
   const rules = policy?.rules ?? [];
-  const taskId = agent.current_task ?? "nba-injuries";
-  const state = spendState(db, agentId, taskId, new Date());
+  // null until the agent's first payment request names a task.
+  const taskId: string | null = agent.current_task ?? null;
+  const state = spendState(db, agentId, taskId ?? "", new Date());
   const task = rules.find((r) => r.kind === "taskBudget" && (r.taskId === "*" || r.taskId === taskId));
   const day = rules.find((r) => r.kind === "periodBudget" && r.period === "day");
   return {
     agent: { id: agent.id, name: agent.name, status: agent.status, pausedReason: agent.paused_reason },
-    task: { id: taskId, spentMicro: state.taskSpentMicro, budgetMicro: task?.kind === "taskBudget" ? task.maxMicro : null },
+    task: { id: taskId, spentMicro: taskId ? state.taskSpentMicro : 0, budgetMicro: task?.kind === "taskBudget" ? task.maxMicro : null },
     today: { spentMicro: state.periodSpentMicro.day, capMicro: day?.kind === "periodBudget" ? day.maxMicro : null },
-    pending: pendingHolds(db, agentId),
-    recent: (db.prepare(`${ACTIVITY_SQL} WHERE r.agent_id=? ORDER BY r.created_ms DESC LIMIT 10`).all(agentId) as any[]).map(activityItem),
+    // Dev-mode hold tokens are for the owner's "Review" button only; an agent never sees one.
+    // Agents also never see anomaly measurements (see redactAnomalies).
+    pending: pendingHolds(db, agentId).map((h) => (forOwner ? h : { ...h, token: undefined, reason: agentReason(db, h.requestId, h.reason) })),
+    recent: (db.prepare(`${ACTIVITY_SQL} WHERE r.agent_id=? ORDER BY r.created_ms DESC LIMIT 10`).all(agentId) as any[]).map(forOwner ? activityItem : agentActivityItem),
     rules: ruleViews(rules),
     policy: policyView(policy),
     passkey: hasPasskey(db),
+    // Today (UTC, like the daily budget), by money state; and the last 8 hours. See overview.ts for the states.
+    totals: todayTotals(db, agentId),
+    series: hourlySeries(db, agentId),
   };
 });
 
-route("POST", "/v1/agents/:agentId/pause", async ({ db, params, body }) => {
+const AGENT_ID_RE = /^[A-Za-z0-9_.:-]{1,100}$/;
+function requireAgent(db: DB, agentId: string) {
+  const agent = db.prepare("SELECT * FROM agents WHERE id=?").get(agentId) as any;
+  if (!agent) throw new HttpError(404, `No agent "${agentId}" is registered.`);
+  return agent;
+}
+
+route("GET", "/v1/agents", "owner", ({ db, auth }) => ({ agents: listAgents(db, auth) }));
+
+// Registers an agent id in the firewall's own table. It does NOT create a wallet (payer.ts / Person 1) or a
+// credential: the agent can't pay until rules are saved and FIREWALL_AGENT_TOKENS has a token for it.
+route("POST", "/v1/agents", "owner", ({ db, body }) => {
+  const id = typeof body?.id === "string" ? body.id.trim() : "";
+  if (!AGENT_ID_RE.test(id)) throw new HttpError(400, "Agent id: 1-100 letters, digits, dots, dashes, underscores or colons.");
+  const name = typeof body?.name === "string" && body.name.trim() ? body.name.trim().slice(0, 60) : id.replace(/-/g, " ");
+  if (db.prepare("SELECT 1 FROM agents WHERE id=?").get(id)) throw new HttpError(409, `An agent "${id}" is already registered.`);
+  ensureAgent(db, id, name);
+  return { agent: { id, name, status: "active" }, wallet: null, note: "Registered in the firewall only. No wallet or credential was created." };
+});
+
+route("POST", "/v1/agents/:agentId/pause", "owner", async ({ db, params, body }) => {
+  requireAgent(db, params.agentId!);
   setPaused(db, params.agentId!, true, typeof body?.reason === "string" ? body.reason : undefined);
   return { status: "paused" };
 });
-route("POST", "/v1/agents/:agentId/resume", ({ db, params }) => {
+route("POST", "/v1/agents/:agentId/resume", "owner", ({ db, params }) => {
+  requireAgent(db, params.agentId!);
   setPaused(db, params.agentId!, false);
   return { status: "active" };
 });
 
-route("GET", "/v1/activity", ({ db, query }) => {
-  const agentId = query.get("agentId") ?? "research-agent";
-  const blocked = query.get("filter") === "blocked";
-  const limit = Math.min(500, Number(query.get("limit") ?? 200));
-  const rows = db
-    .prepare(`${ACTIVITY_SQL} WHERE r.agent_id=? ${blocked ? "AND r.outcome IN ('block','hold')" : ""} ORDER BY r.created_ms DESC LIMIT ?`)
-    .all(agentId, limit) as any[];
+// Filters (all optional): agentId (default research-agent, "all" for every agent), filter=blocked (legacy),
+// status=paid|pending|held|blocked|returned, anomalies=1, requestId, limit (≤ 500).
+route("GET", "/v1/activity", "owner", ({ db, query }) => {
+  const { where, args, limit } = activityFilter(query);
+  const rows = db.prepare(`${ACTIVITY_SQL} ${where} ORDER BY r.created_ms DESC LIMIT ?`).all(...args, limit) as any[];
   return { items: rows.map(activityItem) };
 });
 
-route("POST", "/v1/rules/compile", async ({ body }) => {
+// Recent anomaly signals, one item per signal, newest first. Owner only: the measurements describe the agent's
+// baselines. Uses the partial index requests_agent_anomalous.
+route("GET", "/v1/agents/:agentId/anomalies", "owner", ({ db, params, query }) => {
+  const limit = Math.max(1, Math.min(500, Number(query.get("limit") ?? 100) || 100));
+  const sinceMs = Number(query.get("sinceMs") ?? 0) || 0;
+  const rows = db
+    .prepare(`SELECT request_id, agent_id, created_at, created_ms, outcome, status, amount_micro, recipient, task_id, anomalies_json FROM requests
+      WHERE agent_id=? AND anomalies_json <> '[]' AND created_ms >= ? ORDER BY created_ms DESC LIMIT ?`)
+    .all(params.agentId!, sinceMs, limit) as any[];
+  const items = rows.flatMap((r) =>
+    (JSON.parse(r.anomalies_json) as AnomalySignal[]).map((a) => ({
+      requestId: r.request_id, agentId: r.agent_id, type: a.type, severity: a.severity, explanation: a.explanation, at: r.created_at,
+      measured: a.measured, outcome: r.outcome, status: r.status, amountMicro: r.amount_micro, recipient: r.recipient, taskId: r.task_id,
+    })),
+  );
+  return { items };
+});
+
+route("POST", "/v1/rules/compile", "owner", async ({ body }) => {
   const text = typeof body?.text === "string" ? body.text : "";
   const r = await compileRules(text);
   return { rules: r.rules, views: ruleViews(r.rules), ambiguities: r.ambiguities, model: r.model, errors: r.errors };
 });
 
-route("POST", "/v1/rules/dry-run", ({ db, body }) => {
+route("POST", "/v1/rules/dry-run", "owner", ({ db, body }) => {
   const agentId = typeof body?.agentId === "string" ? body.agentId : "research-agent";
   const { rules, errors } = validateRules(body?.rules);
   if (errors.length) throw new HttpError(400, errors.join("; "));
   const samples: Sample[] = Array.isArray(body?.samples) && body.samples.length ? body.samples : defaultSamples(rules);
   const agent = db.prepare("SELECT current_task FROM agents WHERE id=?").get(agentId) as any;
-  const state = spendState(db, agentId, agent?.current_task ?? "nba-injuries", new Date());
+  const state = spendState(db, agentId, agent?.current_task ?? "", new Date());
   return { results: dryRun(rules, samples, state, agentId) };
 });
 
-route("GET", "/v1/policy/:agentId", ({ db, params }) => {
+route("GET", "/v1/policy/:agentId", "owner", ({ db, params }) => {
   const p = activePolicy(db, params.agentId!);
   const notify = db.prepare("SELECT * FROM notify WHERE agent_id=?").get(params.agentId!) as any;
   return { policy: policyView(p), views: ruleViews(p?.rules ?? []), notify: notify ? { phone: notify.phone, events: JSON.parse(notify.events_json) } : null };
 });
 
-route("POST", "/v1/policy", async ({ db, body }) => {
+route("POST", "/v1/policy", "owner", async ({ db, body }) => {
   if (body?.confirmed !== true) throw new HttpError(400, "Rules are only saved after you confirm them.");
   const agentId = typeof body?.agentId === "string" ? body.agentId : "research-agent";
   const { rules, errors } = validateRules(body?.rules);
@@ -195,26 +307,32 @@ route("POST", "/v1/policy", async ({ db, body }) => {
 });
 
 // Agent-facing
-route("POST", "/v1/payments/evaluate", async ({ db, body }) => {
+route("POST", "/v1/payments/evaluate", "agent", async ({ db, body, who }) => {
   let req;
   try {
     req = parsePaymentRequest(body);
   } catch (e) {
     throw new HttpError(400, (e as Error).message);
   }
+  assertActsFor(who, req.agentId);
   const before = spendState(db, req.agentId, req.taskId, new Date());
   const res = evaluateAndReserve(db, req, { holdMinutes: config.holdMinutes, devMode: config.devMode });
+  // A replayed requestId returns the stored decision; don't hand another agent's decision back.
+  if (res.duplicate) assertOwnsRequest(db, { kind: "agent", agentId: req.agentId }, req.requestId);
   if (!res.duplicate) {
     if (res.decision.outcome === "hold" && res.holdToken) void onHold(db, req.requestId, res.holdToken, res.expiresAt!);
     if (res.decision.triggerPause) void notifyEvent(db, req.agentId, "paused", `Your agent was paused: ${res.decision.reason} Reply PAUSE anytime to stop it, or resume it from the dashboard.`);
     if (res.decision.outcome === "allow") void maybeBudgetAlert(db, req.agentId, req.taskId, before.taskSpentMicro);
   }
-  // The agent never receives the approval token.
-  return { ...res.decision, duplicate: res.duplicate, policyHash: res.policyHash };
+  // The agent never receives the approval token, nor the anomaly measurements (they'd show a hijacked agent how
+  // to stay just under each baseline). A hold's reason still says why.
+  const { anomalies: _owner, ...decision } = res.decision;
+  return { ...redactAnomalies(decision), duplicate: res.duplicate, policyHash: res.policyHash };
 });
-route("GET", "/v1/signer", () => ({ address: payerAddress(), mode: paymentMode, network: PAY_NETWORK, arcNetwork: network }));
+route("GET", "/v1/signer", "public", () => ({ address: payerAddress(), mode: paymentMode, network: PAY_NETWORK, arcNetwork: network }));
 // circle-agent-wallet mode: the firewall makes the paid request itself (see payer.ts).
-route("POST", "/v1/payments/:requestId/pay", async ({ db, params, body }) => {
+route("POST", "/v1/payments/:requestId/pay", "agent", async ({ db, params, body, who }) => {
+  assertOwnsRequest(db, who, params.requestId!);
   if (typeof body?.url !== "string") throw new HttpError(400, "url is required");
   try {
     return await payWithCircle(db, params.requestId!, body.url);
@@ -223,7 +341,8 @@ route("POST", "/v1/payments/:requestId/pay", async ({ db, params, body }) => {
     throw e;
   }
 });
-route("POST", "/v1/payments/:requestId/sign", async ({ db, params, body }) => {
+route("POST", "/v1/payments/:requestId/sign", "agent", async ({ db, params, body, who }) => {
+  assertOwnsRequest(db, who, params.requestId!);
   try {
     return { signature: await signForRequest(db, params.requestId!, body?.typedData) };
   } catch (e) {
@@ -231,30 +350,45 @@ route("POST", "/v1/payments/:requestId/sign", async ({ db, params, body }) => {
     throw e;
   }
 });
-route("POST", "/v1/payments/:requestId/settled", ({ db, params, body }) => ({ ok: markSettled(db, params.requestId!, typeof body?.txHash === "string" ? body.txHash : undefined) }));
-route("POST", "/v1/payments/:requestId/failed", ({ db, params }) => ({ ok: markFailed(db, params.requestId!) }));
+// Outcome reports. Today the agent itself reports these in local-key mode, so they accept the owning agent as well
+// as FIREWALL_SERVICE_TOKEN. See README Safety limits.
+// circle-agent-wallet mode records outcomes inside payer.ts, and an agent report there is an attack: /failed sent
+// while /pay awaits the seller probe releases the reservation, the payment still goes through, and the spend
+// stops counting. So in that mode only the service token may report.
+function assertMayReport(db: DB, who: Principal | null, requestId: string) {
+  if (paymentMode === "circle-agent-wallet" && who?.kind !== "service") throw new HttpError(403, "The firewall records payment outcomes itself in circle-agent-wallet mode.");
+  assertOwnsRequest(db, who, requestId);
+}
+route("POST", "/v1/payments/:requestId/settled", "settlement", ({ db, params, body, who }) => {
+  assertMayReport(db, who, params.requestId!);
+  return { ok: markSettled(db, params.requestId!, typeof body?.txHash === "string" ? body.txHash : undefined) };
+});
+route("POST", "/v1/payments/:requestId/failed", "settlement", ({ db, params, who }) => {
+  assertMayReport(db, who, params.requestId!);
+  return { ok: markFailed(db, params.requestId!) };
+});
 
 // Approvals
-route("GET", "/v1/approvals/:token", ({ db, params }) => {
+route("GET", "/v1/approvals/:token", "approvalLink", ({ db, params }) => {
   const h = holdByToken(db, params.token!);
   if (!h) throw new HttpError(404, "This link isn't valid.");
   return { ...h, passkeyReady: hasPasskey(db) };
 });
-route("POST", "/v1/approvals/:token/deny", async ({ db, params }) => {
+route("POST", "/v1/approvals/:token/deny", "approvalLink", async ({ db, params }) => {
   const h = holdByToken(db, params.token!);
   if (!h) throw new HttpError(404, "This link isn't valid.");
   const r = await denyHold(db, h.requestId);
   if (!r.ok) throw new HttpError(409, `This payment was already ${h.status}.`);
   return { status: "denied", refundTx: r.refundTx, refundTxUrl: explorerTx(r.refundTx) };
 });
-route("POST", "/v1/approvals/:token/approve/options", async ({ db, params }) => {
+route("POST", "/v1/approvals/:token/approve/options", "approvalLink", async ({ db, params }) => {
   try {
     return await approvalOptions(db, params.token!);
   } catch (e) {
     throw new HttpError(409, (e as Error).message);
   }
 });
-route("POST", "/v1/approvals/:token/approve", async ({ db, params, body }) => {
+route("POST", "/v1/approvals/:token/approve", "approvalLink", async ({ db, params, body }) => {
   try {
     const r = await approveWithPasskey(db, params.token!, body?.assertion);
     return { status: "approved", releaseTx: r.releaseTx, releaseTxUrl: explorerTx(r.releaseTx) };
@@ -264,8 +398,8 @@ route("POST", "/v1/approvals/:token/approve", async ({ db, params, body }) => {
 });
 
 // Owner passkey enrollment
-route("POST", "/v1/owner/passkey/options", ({ db }) => registrationOptions(db));
-route("POST", "/v1/owner/passkey", async ({ db, body }) => {
+route("POST", "/v1/owner/passkey/options", "owner", ({ db }) => registrationOptions(db));
+route("POST", "/v1/owner/passkey", "owner", async ({ db, body }) => {
   try {
     return await registerPasskey(db, body?.response);
   } catch (e) {
@@ -274,7 +408,7 @@ route("POST", "/v1/owner/passkey", async ({ db, body }) => {
 });
 
 // Twilio inbound SMS
-route("POST", "/v1/twilio/inbound", async ({ db, req, raw }) => {
+route("POST", "/v1/twilio/inbound", "webhook", async ({ db, req, raw }) => {
   const params = Object.fromEntries(new URLSearchParams(raw)) as Record<string, string>;
   const url = config.publicUrl + (req.url ?? "");
   if (!validTwilioSignature(req.headers["x-twilio-signature"] as string | undefined, url, params)) throw new HttpError(403, "bad signature");
@@ -341,42 +475,69 @@ export async function flushDecisionsToArc(db: DB) {
 }
 
 // ---------- server ----------
+// Browsers reach the firewall only through the dashboard's server-side proxy, so CORS is never "*".
+// CORS is not authentication; every route is still checked by authorize().
 function cors(res: ServerResponse) {
-  res.setHeader("Access-Control-Allow-Origin", config.devMode ? "*" : config.appBaseUrl);
+  res.setHeader("Access-Control-Allow-Origin", config.appBaseUrl);
+  res.setHeader("Vary", "Origin");
   res.setHeader("Access-Control-Allow-Methods", "GET, POST, OPTIONS");
   res.setHeader("Access-Control-Allow-Headers", "Content-Type");
 }
 
-export function createApp(db: DB) {
-  return createServer(async (req, res) => {
-    cors(res);
-    if (req.method === "OPTIONS") return res.writeHead(204).end();
-    const url = new URL(req.url ?? "/", "http://x");
-    const match = routes.find((r) => r.method === req.method && r.re.test(url.pathname));
-    if (!match) return res.writeHead(404, { "Content-Type": "application/json" }).end(JSON.stringify({ error: "not found" }));
-    const m = url.pathname.match(match.re)!;
-    const params = Object.fromEntries(match.keys.map((k, i) => [k, decodeURIComponent(m[i + 1]!)]));
-    let raw = "";
-    for await (const chunk of req) {
-      raw += chunk;
-      if (raw.length > 100_000) return res.writeHead(413).end();
-    }
-    let body: any = undefined;
-    if (raw && (req.headers["content-type"] ?? "").includes("application/json")) {
-      try {
-        body = JSON.parse(raw);
-      } catch {
-        return res.writeHead(400, { "Content-Type": "application/json" }).end(JSON.stringify({ error: "invalid JSON" }));
-      }
-    }
+export function createApp(db: DB, auth: AuthConfig = authConfig) {
+  // Last-resort guard: any error escaping the handler (e.g. the client aborting mid-body) must not crash the firewall.
+  return createServer((req, res) =>
+    void handle(db, auth, req, res).catch((e) => {
+      console.error(`[${req.method} ${req.url}]`, e);
+      if (!res.headersSent) res.writeHead(500, { "Content-Type": "application/json" }).end(JSON.stringify({ error: "Something went wrong on our side." }));
+      else res.destroy();
+    }),
+  );
+}
+
+async function handle(db: DB, auth: AuthConfig, req: IncomingMessage, res: ServerResponse) {
+  cors(res);
+  if (req.method === "OPTIONS") return res.writeHead(204).end();
+  const url = new URL(req.url ?? "/", "http://x");
+  const match = routes.find((r) => r.method === req.method && r.re.test(url.pathname));
+  if (!match) return res.writeHead(404, { "Content-Type": "application/json" }).end(JSON.stringify({ error: "not found" }));
+  const presented = authenticate(req.headers.authorization, auth);
+  const denied = authorize(match.access, presented, auth);
+  if (denied) {
+    const headers: Record<string, string> = { "Content-Type": "application/json" };
+    if (denied.status === 401) headers["WWW-Authenticate"] = 'Bearer realm="agent-firewall"';
+    return res.writeHead(denied.status, headers).end(JSON.stringify({ error: denied.message }));
+  }
+  // Legacy unauthenticated agent (testnet-only switch): no principal, handlers fall back to the claimed agentId.
+  const who = presented === "invalid" ? null : presented;
+  const m = url.pathname.match(match.re)!;
+  let params: Record<string, string>;
+  try {
+    params = Object.fromEntries(match.keys.map((k, i) => [k, decodeURIComponent(m[i + 1]!)]));
+  } catch {
+    // Malformed %-escape. Uncaught here it would be an unhandled rejection and take the whole process down.
+    return res.writeHead(400, { "Content-Type": "application/json" }).end(JSON.stringify({ error: "bad path" }));
+  }
+  let raw = "";
+  for await (const chunk of req) {
+    raw += chunk;
+    if (raw.length > 100_000) return res.writeHead(413).end();
+  }
+  let body: any = undefined;
+  if (raw && (req.headers["content-type"] ?? "").includes("application/json")) {
     try {
-      const out: any = await match.handler({ db, req, params, query: url.searchParams, body, raw });
-      if (out && typeof out === "object" && "__twiml" in out) return res.writeHead(200, { "Content-Type": "text/xml" }).end(out.__twiml);
-      res.writeHead(200, { "Content-Type": "application/json" }).end(JSON.stringify(out ?? { ok: true }));
-    } catch (e) {
-      const status = e instanceof HttpError ? e.status : 500;
-      if (status === 500) console.error(`[${req.method} ${url.pathname}]`, e);
-      res.writeHead(status, { "Content-Type": "application/json" }).end(JSON.stringify({ error: status === 500 ? "Something went wrong on our side." : (e as Error).message }));
+      body = JSON.parse(raw);
+    } catch {
+      return res.writeHead(400, { "Content-Type": "application/json" }).end(JSON.stringify({ error: "invalid JSON" }));
     }
-  });
+  }
+  try {
+    const out: any = await match.handler({ db, req, params, query: url.searchParams, body, raw, who, auth });
+    if (out && typeof out === "object" && "__twiml" in out) return res.writeHead(200, { "Content-Type": "text/xml" }).end(out.__twiml);
+    res.writeHead(200, { "Content-Type": "application/json" }).end(JSON.stringify(out ?? { ok: true }));
+  } catch (e) {
+    const status = e instanceof HttpError ? e.status : 500;
+    if (status === 500) console.error(`[${req.method} ${url.pathname}]`, e);
+    res.writeHead(status, { "Content-Type": "application/json" }).end(JSON.stringify({ error: status === 500 ? "Something went wrong on our side." : (e as Error).message }));
+  }
 }

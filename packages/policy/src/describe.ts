@@ -41,5 +41,10 @@ export function describeRule(rule: Rule): string {
       return `Text me before any payment over ${formatUsd(rule.aboveMicro)}.`;
     case "paused":
       return "All spending is paused.";
+    case "anomalyGuard": {
+      const level = rule.minSeverity === "low" ? "even slightly unusual" : rule.minSeverity === "medium" ? "unusual" : "highly unusual";
+      const which = rule.signals?.length ? ` (${rule.signals.map((s) => s.toLowerCase().replace(/_/g, " ")).join(", ")})` : "";
+      return `${rule.onViolation === "block" ? "Block payments" : "Ask for your OK"} when spending looks ${level} for this agent${which}.`;
+    }
   }
 }

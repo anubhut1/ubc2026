@@ -32,6 +32,22 @@ export type ActivityItem = {
   /** Vault refund or release tx for a held payment. */
   resolveTx?: string | null;
   resolveTxUrl?: string | null;
+  /** What is actually known about the money (firewall overview.ts settlementOf). Missing from older firewalls. */
+  settlement?: Settlement;
+};
+
+export type SettlementState =
+  | "pending_signature" | "awaiting_outcome" | "uncertain" | "simulated" | "accepted_no_reference" | "accepted_with_reference"
+  | "confirmed_onchain" | "approved_unrecorded" | "held" | "not_paid";
+export type Settlement = {
+  state: SettlementState;
+  label: string;
+  reference: string | null;
+  /** True only for a transaction the firewall itself sent and saw succeed on Arc (a vault release). */
+  verifiedOnchain: boolean;
+  simulated: boolean;
+  needsReconciliation: boolean;
+  reconciledByOwner: boolean;
 };
 
 /** Today's money by state (UTC day). "paid" = Gateway accepted or vault released; never an onchain settlement claim. */
@@ -42,6 +58,11 @@ export type Totals = {
   stoppedMicro: number;
   counts: { requests: number; allowed: number; held: number; blocked: number; ownerApproved: number };
   anomalies: { flaggedRequests: number; high: number };
+  /** paidMicro / inProgressMicro split by evidence. Only confirmedOnchainMicro is verified; simulatedMicro is no money. */
+  evidence?: {
+    simulatedMicro: number; acceptedNoReferenceMicro: number; acceptedWithReferenceMicro: number; confirmedOnchainMicro: number; approvedUnrecordedMicro: number;
+    pendingSignatureMicro: number; awaitingOutcomeMicro: number; uncertainMicro: number; uncertainCount: number;
+  };
 };
 export type SeriesBucket = { start: string; paidMicro: number; inProgressMicro: number; stoppedMicro: number; paid: number; inProgress: number; stopped: number };
 
@@ -78,6 +99,9 @@ export type Health = {
   twilio?: boolean;
   llm?: boolean;
   passkey?: boolean;
+  /** Sellers accept any payment header: "paid" rows are simulated, no money moves. */
+  mockPayments?: boolean;
+  reservationTtlMinutes?: number;
 };
 
 export type HeldPayment = {

@@ -2,7 +2,7 @@ import { createServer, type IncomingMessage, type ServerResponse } from "node:ht
 import { describeRule, enforcedBy, formatUsd, policyHash, shortRecipient, validateRules, type AnomalySignal, type Rule, type Violation } from "@agent-firewall/policy";
 import { config, explorerTx } from "./config";
 import { ensureAgent, type DB } from "./db";
-import { activePolicy, evaluateAndReserve, markFailed, markSettled, parsePaymentRequest, savePolicy, setPaused, spendState } from "./engine";
+import { ReconcileError, activePolicy, evaluateAndReserve, markFailed, markSettled, parsePaymentRequest, reconcilePayment, savePolicy, setPaused, spendState } from "./engine";
 import { compileRules } from "./compiler";
 import { defaultSamples, dryRun, type Sample } from "./dryrun";
 import { arcStatus, commitPolicyOnArc, logDecisionsOnArc, vaultFunding } from "./arc";
@@ -23,7 +23,7 @@ import { sendSms, smsConfigured, twiml, validTwilioSignature } from "./sms";
 import { SignError, signForRequest } from "./signer";
 import { PAY_NETWORK, PayError, network, payWithCircle, payerAddress, paymentMode } from "./payer";
 import { authConfig, authenticate, authSummary, type AuthConfig, type Principal } from "./auth";
-import { activityFilter, hourlySeries, listAgents, todayTotals } from "./overview";
+import { activityFilter, hourlySeries, listAgents, settlementOf, todayTotals } from "./overview";
 
 class HttpError extends Error {
   constructor(public status: number, message: string) {
@@ -106,7 +106,7 @@ function sentence(r: any): string {
       return `Tried to buy ${what.charAt(0).toLowerCase() + what.slice(1)}, ${amt}, but the payment didn't go through (budget returned)`;
     case "unconfirmed":
       if (typeof r.failure_reason === "string" && r.failure_reason.startsWith("Circle wallet policy")) return `Blocked ${amt} to ${to}: ${r.failure_reason}`;
-      return `Payment for ${what.charAt(0).toLowerCase() + what.slice(1)}, ${amt}, failed after signing; still counted until the authorization expires`;
+      return `Payment for ${what.charAt(0).toLowerCase() + what.slice(1)}, ${amt}, failed after signing; still counted until you reconcile it`;
     case "blocked":
       return `Blocked ${amt} to ${to}: ${r.reason}`;
     case "held":
@@ -143,6 +143,8 @@ function activityItem(r: any) {
     arcTxUrl: explorerTx(r.hold_tx ?? r.arc_tx),
     resolveTx: r.resolve_tx ?? null,
     resolveTxUrl: explorerTx(r.resolve_tx),
+    // How much is actually known about the money (simulated, no reference, unverified reference, confirmed). Additive.
+    settlement: settlementOf(r),
   };
 }
 
@@ -183,7 +185,8 @@ route("GET", "/health", "public", async ({ db, who, auth }) => {
     vault = { error: e instanceof Error ? e.message.split("\n")[0]! : "unreadable" };
   }
   const buyer = await fundingStatus(db).catch((e) => ({ enabled: true, error: e instanceof Error ? e.message.split("\n")[0]! : "unreadable" }));
-  return { ok: true, signer: payerAddress(), paymentMode, network, arc: arcStatus(), vault, buyer, twilio: smsConfigured(), llm: Boolean(config.llmApiKey), passkey: hasPasskey(db), auth: authSummary(auth) };
+  return { ok: true, signer: payerAddress(), paymentMode, network, arc: arcStatus(), vault, buyer, twilio: smsConfigured(), llm: Boolean(config.llmApiKey), passkey: hasPasskey(db), auth: authSummary(auth),
+    mockPayments: config.mockPayments, reservationTtlMinutes: config.reservationTtlMinutes };
 });
 
 route("GET", "/v1/agents/:agentId/summary", "ownerOrAgent", ({ db, params, who }) => {
@@ -344,16 +347,26 @@ route("POST", "/v1/payments/evaluate", "agent", async ({ db, body, who }) => {
   return { ...redactAnomalies(decision), duplicate: res.duplicate, policyHash: res.policyHash };
 });
 route("GET", "/v1/signer", "public", () => ({ address: payerAddress(), mode: paymentMode, network: PAY_NETWORK, arcNetwork: network }));
+/**
+ * Request ids a /pay call is working on. payWithCircle awaits the seller probe before it claims signed_ms, so the
+ * reservation timeout and owner reconciliation skip these (engine.releaseStaleReservations / reconcilePayment).
+ */
+export const paymentsInFlight = new Set<string>();
+
 // circle-agent-wallet mode: the firewall makes the paid request itself (see payer.ts).
 route("POST", "/v1/payments/:requestId/pay", "agent", async ({ db, params, body, who }) => {
   assertOwnsRequest(db, who, params.requestId!);
   assertAgentActive(db, params.requestId!);
   if (typeof body?.url !== "string") throw new HttpError(400, "url is required");
+  if (paymentsInFlight.has(params.requestId!)) throw new HttpError(409, "This payment is already being made.");
+  paymentsInFlight.add(params.requestId!);
   try {
     return await payWithCircle(db, params.requestId!, body.url);
   } catch (e) {
     if (e instanceof PayError) throw new HttpError(e.circlePolicy ? 402 : 403, e.message);
     throw e;
+  } finally {
+    paymentsInFlight.delete(params.requestId!);
   }
 });
 route("POST", "/v1/payments/:requestId/sign", "agent", async ({ db, params, body, who }) => {
@@ -382,6 +395,20 @@ route("POST", "/v1/payments/:requestId/settled", "settlement", ({ db, params, bo
 route("POST", "/v1/payments/:requestId/failed", "settlement", ({ db, params, who }) => {
   assertMayReport(db, who, params.requestId!);
   return { ok: markFailed(db, params.requestId!) };
+});
+
+// Owner resolves an uncertain outcome (unconfirmed, or signed and never reported). Never automatic: the firewall
+// can't tell whether money moved, so only the owner, after checking the payer's history, can release that budget.
+route("POST", "/v1/payments/:requestId/reconcile", "owner", ({ db, params, body }) => {
+  const outcome = body?.outcome;
+  if (outcome !== "paid" && outcome !== "not_paid") throw new HttpError(400, 'outcome must be "paid" or "not_paid"');
+  const txHash = typeof body?.txHash === "string" && body.txHash.trim() ? body.txHash.trim().slice(0, 200) : undefined;
+  try {
+    return reconcilePayment(db, params.requestId!, outcome, { txHash, note: typeof body?.note === "string" ? body.note : undefined, inFlight: paymentsInFlight });
+  } catch (e) {
+    if (e instanceof ReconcileError) throw new HttpError(409, e.message);
+    throw e;
+  }
 });
 
 // Approvals

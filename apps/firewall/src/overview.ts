@@ -8,24 +8,106 @@
 //   inProgress  status reserved | unconfirmed. Allowed and counted against budgets, not confirmed paid.
 //   held        status held. Waiting for the owner; counts against budgets until resolved.
 //   stopped     status blocked | denied | expired. Never left (or came back to) the treasury.
-//   released    failed before signing; the budget was given back. Not money spent.
+//   released    failed before signing, timed out unused, or reconciled as not paid; the budget was given back.
+//
+// None of these is an onchain settlement we verified. settlementOf() says, per payment, how much is actually known.
 import { periodStart, type Rule } from "@agent-firewall/policy";
 import type { AuthConfig } from "./auth";
+import { config } from "./config";
 import type { DB } from "./db";
 import { activePolicy, spendState } from "./engine";
 
+/**
+ * What the firewall actually knows about a payment's money, from weakest to strongest evidence. Derived from the row
+ * (status, signed_ms, simulated, settled_tx, the hold's resolve_tx); requests.status itself is unchanged.
+ *   pending_signature        allowed and reserved; nothing signed or paid yet
+ *   awaiting_outcome         signed (or the Circle CLI started); no outcome reported yet
+ *   uncertain                failed after signing/paying started: may or may not have moved money
+ *   simulated                "settled" under MOCK_PAYMENTS=1: the seller accepted any header, no money moved
+ *   accepted_no_reference    the seller accepted it; no transaction reference was reported
+ *   accepted_with_reference  the seller accepted it and returned a reference; the firewall has NOT verified it onchain
+ *   confirmed_onchain        owner-approved hold released by the ApprovalVault; we sent that tx and saw it succeed
+ *   approved_unrecorded      owner-approved hold whose vault release isn't recorded on Arc
+ *   held                     waiting for the owner
+ *   not_paid                 blocked, cancelled, expired or released: no money left
+ */
+export type SettlementState =
+  | "pending_signature" | "awaiting_outcome" | "uncertain" | "simulated" | "accepted_no_reference" | "accepted_with_reference"
+  | "confirmed_onchain" | "approved_unrecorded" | "held" | "not_paid";
+
+const SETTLEMENT_LABEL: Record<SettlementState, string> = {
+  pending_signature: "Allowed, not paid yet",
+  awaiting_outcome: "Sent, waiting for the outcome",
+  uncertain: "Outcome unknown, counted until you reconcile it",
+  simulated: "Simulated (mock seller), no money moved",
+  accepted_no_reference: "Seller accepted, no transaction reference",
+  accepted_with_reference: "Seller accepted, reference not verified onchain",
+  confirmed_onchain: "Released from the vault, confirmed on Arc",
+  approved_unrecorded: "You approved it; release not recorded on Arc",
+  held: "Held for your OK",
+  not_paid: "No money left",
+};
+
+export interface Settlement {
+  state: SettlementState;
+  label: string;
+  /** The reference we have, if any (seller's settlement reference, or our vault release tx). */
+  reference: string | null;
+  /** True only for transactions the firewall itself sent and saw succeed on Arc. */
+  verifiedOnchain: boolean;
+  simulated: boolean;
+  /** Uncertain, or signed and silent for longer than the reservation TTL: the owner should reconcile it. */
+  needsReconciliation: boolean;
+  reconciledByOwner: boolean;
+}
+
+export function settlementOf(r: any, now = Date.now()): Settlement {
+  const signed = r.signed_ms !== null && r.signed_ms !== undefined;
+  const state: SettlementState = (() => {
+    switch (r.status) {
+      case "reserved": return signed ? "awaiting_outcome" : "pending_signature";
+      case "unconfirmed": return "uncertain";
+      case "settled": return Number(r.simulated) === 1 ? "simulated" : r.settled_tx ? "accepted_with_reference" : "accepted_no_reference";
+      case "approved": return r.resolve_tx ? "confirmed_onchain" : "approved_unrecorded";
+      case "held": return "held";
+      default: return "not_paid";
+    }
+  })();
+  const silent = state === "awaiting_outcome" && now - Number(r.signed_ms) > config.reservationTtlMinutes * 60_000;
+  return {
+    state,
+    label: SETTLEMENT_LABEL[state],
+    reference: state === "confirmed_onchain" ? r.resolve_tx : r.status === "settled" ? r.settled_tx ?? null : null,
+    verifiedOnchain: state === "confirmed_onchain",
+    simulated: state === "simulated",
+    needsReconciliation: state === "uncertain" || silent,
+    reconciledByOwner: r.reconciled_ms !== null && r.reconciled_ms !== undefined,
+  };
+}
+
+// Over requests r LEFT JOIN holds h (see TOTALS_FROM): columns are qualified because holds has a status too.
 const SUMS = `
-  COALESCE(SUM(CASE WHEN status IN ('settled','approved') THEN amount_micro END),0) paid,
-  COALESCE(SUM(CASE WHEN status IN ('reserved','unconfirmed') THEN amount_micro END),0) inProgress,
-  COALESCE(SUM(CASE WHEN status='held' THEN amount_micro END),0) held,
-  COALESCE(SUM(CASE WHEN status IN ('blocked','denied','expired') THEN amount_micro END),0) stopped,
-  COALESCE(SUM(outcome='allow'),0) allowed,
-  COALESCE(SUM(outcome='hold'),0) heldCount,
-  COALESCE(SUM(outcome='block'),0) blocked,
-  COALESCE(SUM(status='approved'),0) ownerApproved,
+  COALESCE(SUM(CASE WHEN r.status IN ('settled','approved') THEN r.amount_micro END),0) paid,
+  COALESCE(SUM(CASE WHEN r.status IN ('reserved','unconfirmed') THEN r.amount_micro END),0) inProgress,
+  COALESCE(SUM(CASE WHEN r.status='held' THEN r.amount_micro END),0) held,
+  COALESCE(SUM(CASE WHEN r.status IN ('blocked','denied','expired') THEN r.amount_micro END),0) stopped,
+  COALESCE(SUM(CASE WHEN r.status='settled' AND r.simulated=1 THEN r.amount_micro END),0) simulated,
+  COALESCE(SUM(CASE WHEN r.status='settled' AND r.simulated=0 AND r.settled_tx IS NULL THEN r.amount_micro END),0) acceptedNoRef,
+  COALESCE(SUM(CASE WHEN r.status='settled' AND r.simulated=0 AND r.settled_tx IS NOT NULL THEN r.amount_micro END),0) acceptedWithRef,
+  COALESCE(SUM(CASE WHEN r.status='approved' AND h.resolve_tx IS NOT NULL THEN r.amount_micro END),0) confirmedOnchain,
+  COALESCE(SUM(CASE WHEN r.status='approved' AND h.resolve_tx IS NULL THEN r.amount_micro END),0) approvedUnrecorded,
+  COALESCE(SUM(CASE WHEN r.status='reserved' AND r.signed_ms IS NULL THEN r.amount_micro END),0) pendingSignature,
+  COALESCE(SUM(CASE WHEN r.status='reserved' AND r.signed_ms IS NOT NULL THEN r.amount_micro END),0) awaitingOutcome,
+  COALESCE(SUM(CASE WHEN r.status='unconfirmed' THEN r.amount_micro END),0) uncertain,
+  COALESCE(SUM(r.status='unconfirmed'),0) uncertainCount,
+  COALESCE(SUM(r.outcome='allow'),0) allowed,
+  COALESCE(SUM(r.outcome='hold'),0) heldCount,
+  COALESCE(SUM(r.outcome='block'),0) blocked,
+  COALESCE(SUM(r.status='approved'),0) ownerApproved,
   COUNT(*) requests,
-  COALESCE(SUM(anomalies_json <> '[]'),0) flagged,
-  COALESCE(SUM(anomalies_json LIKE '%"severity":"high"%'),0) flaggedHigh`;
+  COALESCE(SUM(r.anomalies_json <> '[]'),0) flagged,
+  COALESCE(SUM(r.anomalies_json LIKE '%"severity":"high"%'),0) flaggedHigh`;
+const TOTALS_FROM = "requests r LEFT JOIN holds h ON h.request_id = r.request_id";
 
 export interface Totals {
   paidMicro: number;
@@ -34,6 +116,14 @@ export interface Totals {
   stoppedMicro: number;
   counts: { requests: number; allowed: number; held: number; blocked: number; ownerApproved: number };
   anomalies: { flaggedRequests: number; high: number };
+  /**
+   * paidMicro and inProgressMicro split by evidence (settlementOf). Only confirmedOnchainMicro is a transaction the
+   * firewall verified; simulatedMicro is no money at all.
+   */
+  evidence: {
+    simulatedMicro: number; acceptedNoReferenceMicro: number; acceptedWithReferenceMicro: number; confirmedOnchainMicro: number; approvedUnrecordedMicro: number;
+    pendingSignatureMicro: number; awaitingOutcomeMicro: number; uncertainMicro: number; uncertainCount: number;
+  };
 }
 
 const toTotals = (r: any): Totals => ({
@@ -43,11 +133,17 @@ const toTotals = (r: any): Totals => ({
   stoppedMicro: Number(r?.stopped ?? 0),
   counts: { requests: Number(r?.requests ?? 0), allowed: Number(r?.allowed ?? 0), held: Number(r?.heldCount ?? 0), blocked: Number(r?.blocked ?? 0), ownerApproved: Number(r?.ownerApproved ?? 0) },
   anomalies: { flaggedRequests: Number(r?.flagged ?? 0), high: Number(r?.flaggedHigh ?? 0) },
+  evidence: {
+    simulatedMicro: Number(r?.simulated ?? 0), acceptedNoReferenceMicro: Number(r?.acceptedNoRef ?? 0), acceptedWithReferenceMicro: Number(r?.acceptedWithRef ?? 0),
+    confirmedOnchainMicro: Number(r?.confirmedOnchain ?? 0), approvedUnrecordedMicro: Number(r?.approvedUnrecorded ?? 0),
+    pendingSignatureMicro: Number(r?.pendingSignature ?? 0), awaitingOutcomeMicro: Number(r?.awaitingOutcome ?? 0), uncertainMicro: Number(r?.uncertain ?? 0),
+    uncertainCount: Number(r?.uncertainCount ?? 0),
+  },
 });
 
 /** Today's (UTC day, same as the daily budget) money and counts for one agent. */
 export function todayTotals(db: DB, agentId: string, now = new Date()): Totals {
-  return toTotals(db.prepare(`SELECT ${SUMS} FROM requests WHERE agent_id=? AND created_ms >= ?`).get(agentId, periodStart("day", now).getTime()));
+  return toTotals(db.prepare(`SELECT ${SUMS} FROM ${TOTALS_FROM} WHERE r.agent_id=? AND r.created_ms >= ?`).get(agentId, periodStart("day", now).getTime()));
 }
 
 export interface SeriesBucket { start: string; paidMicro: number; inProgressMicro: number; stoppedMicro: number; paid: number; inProgress: number; stopped: number }
@@ -87,7 +183,7 @@ const budgetOf = (rules: Rule[], taskId: string) => {
 export function listAgents(db: DB, auth: AuthConfig, now = new Date()) {
   const agents = db.prepare("SELECT * FROM agents ORDER BY created_at, id").all() as any[];
   const since = periodStart("day", now).getTime();
-  const totals = new Map((db.prepare(`SELECT agent_id, ${SUMS} FROM requests WHERE created_ms >= ? GROUP BY agent_id`).all(since) as any[]).map((r) => [r.agent_id, toTotals(r)]));
+  const totals = new Map((db.prepare(`SELECT r.agent_id, ${SUMS} FROM ${TOTALS_FROM} WHERE r.created_ms >= ? GROUP BY r.agent_id`).all(since) as any[]).map((r) => [r.agent_id, toTotals(r)]));
   const pending = new Map((db.prepare("SELECT r.agent_id, COUNT(*) n FROM holds h JOIN requests r ON r.request_id=h.request_id WHERE h.status='held' GROUP BY r.agent_id").all() as any[]).map((r) => [r.agent_id, Number(r.n)]));
   const day = 24 * 3_600_000;
   const flagged = new Map((db.prepare("SELECT agent_id, COUNT(*) n, COALESCE(SUM(anomalies_json LIKE '%\"severity\":\"high\"%'),0) high FROM requests WHERE anomalies_json <> '[]' AND created_ms >= ? GROUP BY agent_id").all(now.getTime() - day) as any[]).map((r) => [r.agent_id, { requests: Number(r.n), high: Number(r.high) }]));
@@ -130,7 +226,10 @@ const STATUS_GROUPS: Record<string, string[]> = {
   blocked: ["blocked"],
   returned: ["released", "denied", "expired"],
 };
-export const ACTIVITY_STATUS_GROUPS = Object.keys(STATUS_GROUPS);
+/** Rows the owner should reconcile: uncertain, or signed and silent past the reservation TTL. For ?status=reconcile. */
+export const NEEDS_RECONCILIATION_SQL = (now: number) =>
+  `(r.status='unconfirmed' OR (r.status='reserved' AND r.signed_ms IS NOT NULL AND r.signed_ms < ${Math.floor(now - config.reservationTtlMinutes * 60_000)}))`;
+export const ACTIVITY_STATUS_GROUPS = [...Object.keys(STATUS_GROUPS), "reconcile"];
 
 /** WHERE clause + args for /v1/activity. agentId "all" = every agent. Unknown status groups are ignored. */
 export function activityFilter(q: URLSearchParams): { where: string; args: (string | number)[]; limit: number } {
@@ -145,6 +244,7 @@ export function activityFilter(q: URLSearchParams): { where: string; args: (stri
   if (q.get("filter") === "blocked") add("r.outcome IN ('block','hold')");
   const group = STATUS_GROUPS[q.get("status") ?? ""];
   if (group) add(`r.status IN (${group.map(() => "?").join(",")})`, ...group);
+  if (q.get("status") === "reconcile") add(NEEDS_RECONCILIATION_SQL(Date.now()));
   if (q.get("anomalies") === "1") add("r.anomalies_json <> '[]'");
   const requestId = q.get("requestId");
   if (requestId) add("r.request_id=?", requestId);

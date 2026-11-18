@@ -1,8 +1,8 @@
 import { config } from "./config";
 import { openDb } from "./db";
-import { createApp, flushDecisionsToArc } from "./server";
+import { createApp, flushDecisionsToArc, paymentsInFlight } from "./server";
 import { expireHolds } from "./approvals";
-import { releaseExpiredUnconfirmed } from "./engine";
+import { releaseStaleReservations } from "./engine";
 import { arcStatus } from "./arc";
 import { smsConfigured } from "./sms";
 import { sweepBuyerWallet, topUpGateway } from "./funding";
@@ -24,7 +24,10 @@ setInterval(async () => {
   busy = true;
   try {
     await expireHolds(db);
-    releaseExpiredUnconfirmed(db);
+    // Unsigned, unpaid reservations past their TTL give their budget back. Signed or uncertain payments never do:
+    // they wait for an outcome report or owner reconciliation.
+    const released = releaseStaleReservations(db, { ttlMs: config.reservationTtlMinutes * 60_000, inFlight: paymentsInFlight });
+    if (released.length) console.log(`[reservations] released ${released.length} unused reservation(s) older than ${config.reservationTtlMinutes} min`);
     await flushDecisionsToArc(db);
   } finally {
     busy = false;

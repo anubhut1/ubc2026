@@ -49,6 +49,7 @@ function Overview({ agentId }: { agentId: string }) {
   }
 
   const { task, today, pending, recent, rules, policy, totals, series } = data;
+  const ev = totals.evidence;
   const pct = (spent: number, cap: number | null) => (cap ? Math.min(100, (spent / cap) * 100) : 0);
   const dayLeft = today.capMicro !== null ? Math.max(0, today.capMicro - today.spentMicro) : null;
   const policyUrl = policy ? txUrl(policy.committedTx, policy.committedTxUrl) : null;
@@ -85,14 +86,41 @@ function Overview({ agentId }: { agentId: string }) {
         </div>
       ))}
 
+      {health?.mockPayments && (
+        <div className="callout" role="note">
+          <strong>Simulated payments.</strong> This firewall runs with mock sellers (MOCK_PAYMENTS=1): they accept any payment, so &ldquo;paid&rdquo; amounts here never moved money.
+        </div>
+      )}
+      {ev && ev.uncertainCount > 0 && (
+        <div className="callout attention" role="status">
+          <div>
+            <strong>{ev.uncertainCount === 1 ? "1 payment needs" : `${ev.uncertainCount} payments need`} reconciling</strong> · {formatUsd(ev.uncertainMicro)}
+            <p className="muted">They failed after the payment started, so money may have moved. They stay counted against budgets until you check and mark them.</p>
+          </div>
+          <Link className="btn attention secondary" href={`/activity?agent=${enc}&status=reconcile`}>Review</Link>
+        </div>
+      )}
+
       <section className="cards kpis" aria-label="Today">
         <div className="card">
-          <span className="label" title="The seller accepted the payment through Circle Gateway (Gateway settles on Arc in batches), or you released it from the vault.">Paid today · via Gateway</span>
+          <span className="label" title="The seller accepted the payment through Circle Gateway (Gateway settles on Arc in batches), or you released it from the vault. None of it is an onchain settlement we verified, except vault releases.">Paid today · via Gateway</span>
           <Money micro={totals.paidMicro} size="md" />
+          {ev && <EvidenceLines lines={[
+            [ev.simulatedMicro, "simulated, no money moved"],
+            [ev.acceptedNoReferenceMicro, "no transaction reference"],
+            [ev.acceptedWithReferenceMicro, "reference not verified onchain"],
+            [ev.confirmedOnchainMicro, "vault release confirmed on Arc"],
+            [ev.approvedUnrecordedMicro, "approved, release not on Arc"],
+          ]} />}
         </div>
         <div className="card">
           <span className="label" title="Allowed and counted against budgets, but not confirmed paid yet.">Reserved, not confirmed</span>
           <Money micro={totals.inProgressMicro} size="md" />
+          {ev && <EvidenceLines lines={[
+            [ev.pendingSignatureMicro, "not paid yet"],
+            [ev.awaitingOutcomeMicro, "sent, waiting for the outcome"],
+            [ev.uncertainMicro, "outcome unknown, needs reconciling"],
+          ]} />}
         </div>
         <div className={`card ${totals.heldMicro ? "attention" : ""}`}>
           <span className="label">Held for your OK</span>
@@ -331,6 +359,13 @@ function FundingCard({ health }: { health: Health | null }) {
   );
 }
 
+/** Breakdown under a money tile: only the non-zero parts, so a tile never lists $0.00 lines. */
+function EvidenceLines({ lines }: { lines: [number, string][] }) {
+  const shown = lines.filter(([m]) => m > 0);
+  if (shown.length === 0) return null;
+  return <span className="label">{shown.map(([m, what]) => `${formatUsd(m)} ${what}`).join(" · ")}</span>;
+}
+
 // ---------- rows ----------
 function TxRow({ a }: { a: ActivityItem }) {
   const struck = ["blocked", "released", "denied", "expired"].includes(a.status);
@@ -352,9 +387,9 @@ function TxRow({ a }: { a: ActivityItem }) {
           </span>
         </span>
       </td>
-      <td className="t-status"><OutcomeBadge outcome={a.outcome} status={a.status} /></td>
+      <td className="t-status"><OutcomeBadge outcome={a.outcome} status={a.status} settlement={a.settlement} /></td>
       <td className={`t-amt r mono ${struck ? "strike" : ""}`}>{formatUsd(a.amountMicro)}</td>
-      <td className="r hide-sm">{url ? <a className="mono" href={url} target="_blank" rel="noreferrer">{(a.arcTx ?? "").slice(0, 8)}…</a> : <span className="muted">pending</span>}</td>
+      <td className="r hide-sm">{url ? <a className="mono" href={url} target="_blank" rel="noreferrer">{(a.arcTx ?? "").slice(0, 8)}…</a> : <span className="muted" title="Not yet in the batched decision log on Arc. This is the audit log, not the payment.">not logged yet</span>}</td>
     </tr>
   );
 }

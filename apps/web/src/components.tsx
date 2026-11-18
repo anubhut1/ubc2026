@@ -4,7 +4,7 @@ import { usePathname } from "next/navigation";
 import type { ReactNode } from "react";
 import { formatUsd } from "@agent-firewall/policy";
 import type { AnomalySignal } from "@agent-firewall/policy";
-import { ApiError, type Outcome } from "@/lib/api";
+import { ApiError, type Outcome, type Settlement, type SettlementState } from "@/lib/api";
 import { AgentProvider, useAgents } from "@/lib/agents";
 
 const NAV = [
@@ -153,8 +153,22 @@ const STATUS_LABEL: Record<string, string> = {
   reserved: "Paying", settled: "Paid", released: "Didn't go through", held: "Held for you",
   approved: "You approved", unconfirmed: "Unconfirmed", denied: "You cancelled", expired: "Refunded (no reply)", blocked: "Blocked",
 };
-export function OutcomeBadge({ outcome, status }: { outcome: Outcome; status?: string }) {
-  // blue = allowed, orange = needs attention / blocked. Text label always present (not color alone).
+// With settlement evidence (newer firewalls), say how much is known about the money, not just the status.
+// "Paid" alone is only used where the seller accepted it; simulated and unverified money is labelled as such.
+const SETTLEMENT_BADGE: Partial<Record<SettlementState, { label: string; tone: "ok" | "warn" | "muted" }>> = {
+  pending_signature: { label: "Allowed, not paid yet", tone: "ok" },
+  awaiting_outcome: { label: "Sent, waiting", tone: "ok" },
+  uncertain: { label: "Outcome unknown", tone: "warn" },
+  simulated: { label: "Simulated", tone: "muted" },
+  accepted_no_reference: { label: "Paid · no reference", tone: "ok" },
+  accepted_with_reference: { label: "Paid · unverified ref", tone: "ok" },
+  confirmed_onchain: { label: "Released on Arc", tone: "ok" },
+  approved_unrecorded: { label: "Approved · not on Arc", tone: "warn" },
+};
+export function OutcomeBadge({ outcome, status, settlement }: { outcome: Outcome; status?: string; settlement?: Settlement }) {
+  // blue = allowed, orange = needs attention / blocked, grey = no real money. Text label always present (not color alone).
+  const byEvidence = settlement ? SETTLEMENT_BADGE[settlement.state] : undefined;
+  if (byEvidence) return <span className={`badge ${byEvidence.tone}`} title={settlement!.label}>{byEvidence.label}</span>;
   const label = (status && STATUS_LABEL[status]) ?? OUTCOME_LABEL[outcome];
   const ok = status ? ["reserved", "settled", "approved"].includes(status) : outcome === "allow";
   return <span className={`badge ${ok ? "ok" : "warn"}`}>{label}</span>;

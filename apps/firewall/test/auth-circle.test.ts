@@ -29,7 +29,8 @@ process.env.PAY_URL_PREFIXES = SELLER_URL;
 process.env.SELLER_ADDRESSES = `sportsfeed=${SELLER_ADDR}`;
 
 const { openDb } = await import("../src/db");
-const { createApp } = await import("../src/server");
+const { createApp, paymentsInFlight } = await import("../src/server");
+const { releaseStaleReservations } = await import("../src/engine");
 const { loadAuth } = await import("../src/auth");
 const { paymentMode } = await import("../src/payer");
 
@@ -108,6 +109,37 @@ describe("circle-agent-wallet mode", () => {
     releaseProbe();
     expect((await pay).status).toBe(200);
     expect(row(id).status).toBe("settled");
+  });
+
+  it("B3. the reservation timeout skips a /pay that is waiting on the seller, so the payment stays counted", async () => {
+    const id = `req_ttl_${Date.now()}`;
+    expect((await evaluate(id)).json.outcome).toBe("allow");
+    const pay = call("POST", `/v1/payments/${id}/pay`, ALICE, { url: `${SELLER_URL}/sportsfeed/injuries` });
+    await new Promise((r) => setTimeout(r, 100)); // /pay is now waiting on the seller probe, signed_ms still NULL
+    expect(paymentsInFlight.has(id)).toBe(true);
+    // As if the reservation were long past its TTL.
+    expect(releaseStaleReservations(db, { now: Date.now() + 3_600_000, ttlMs: 15 * 60_000, inFlight: paymentsInFlight })).not.toContain(id);
+    expect((await call("POST", `/v1/payments/${id}/reconcile`, OWNER, { outcome: "not_paid" })).status).toBe(409);
+    expect((await call("POST", `/v1/payments/${id}/pay`, ALICE, { url: `${SELLER_URL}/sportsfeed/injuries` })).status).toBe(409); // no second /pay
+    releaseProbe();
+    expect((await pay).status).toBe(200);
+    expect(row(id).status).toBe("settled");
+    expect(paymentsInFlight.has(id)).toBe(false);
+  });
+
+  // Documents B6. The in-process guard above is what makes the timeout safe today. A release that ignores it (another
+  // process, or a future caller) still lets payWithCircle pay a reservation that was given back, because its signed_ms
+  // claim doesn't require status='reserved'. This flips to a normal passing test once payer.ts adds that condition.
+  it.fails("B6 (needs payer.ts): a reservation released mid-probe must not be paid", async () => {
+    const id = `req_b6_${Date.now()}`;
+    expect((await evaluate(id)).json.outcome).toBe("allow");
+    const pay = call("POST", `/v1/payments/${id}/pay`, ALICE, { url: `${SELLER_URL}/sportsfeed/injuries` });
+    await new Promise((r) => setTimeout(r, 100));
+    releaseStaleReservations(db, { now: Date.now() + 3_600_000, ttlMs: 15 * 60_000 }); // no inFlight guard
+    expect(row(id).status).toBe("released");
+    releaseProbe();
+    const res = await pay;
+    expect(res.status).not.toBe(200); // today: 200, the CLI ran and the spend is no longer counted
   });
 
   it("the service token may still report outcomes", async () => {

@@ -78,6 +78,7 @@ a { color: var(--blue); }
 .badge::before { content: ""; width: 7px; height: 7px; border-radius: 50%; background: currentColor; }
 .badge.ok { color: var(--blue); background: var(--blue-tint); }
 .badge.warn { color: var(--orange); background: var(--orange-tint); }
+.badge.muted { color: var(--muted); background: var(--line); }
 
 .callout { border-radius: var(--r-in); padding: 14px 16px; border: 1px solid; display: flex; flex-direction: column; gap: 4px; align-items: flex-start; }
 .callout.info { background: var(--blue-tint); border-color: transparent; }

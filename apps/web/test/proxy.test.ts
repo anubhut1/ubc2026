@@ -89,6 +89,19 @@ describe("proxy: CSRF and path safety", () => {
     expect(calls).toHaveLength(0);
   });
 
+  it("forwards owner reconciliation with the owner token, and only with a session and same origin", async () => {
+    const f = fakeFirewall(200, '{"status":"released"}');
+    const p = "/v1/payments/req_1/reconcile";
+    const body = '{"outcome":"not_paid"}';
+    expect((await proxy(req("POST", `/api/fw${p}`, { body }), segs(p), env, f)).status).toBe(401);
+    expect((await proxy(req("POST", `/api/fw${p}`, { cookie: createSession(env), origin: "http://evil.test", body }), segs(p), env, f)).status).toBe(403);
+    expect(calls).toHaveLength(0);
+    const r = await proxy(req("POST", `/api/fw${p}`, { cookie: createSession(env), body }), segs(p), env, f);
+    expect(r.status).toBe(200);
+    expect(calls[0]!.url).toBe(`http://firewall.test${p}`);
+    expect((calls[0]!.init.headers as Record<string, string>).Authorization).toBe(`Bearer ${OWNER_TOKEN}`);
+  });
+
   it("never forwards agent payment routes or unknown paths, even with a session", async () => {
     const f = fakeFirewall();
     const cookie = createSession(env);

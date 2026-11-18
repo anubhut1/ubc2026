@@ -14,6 +14,7 @@ const STATUS = [
   { id: "held", label: "Held" },
   { id: "blocked", label: "Blocked" },
   { id: "returned", label: "Returned" },
+  { id: "reconcile", label: "Needs reconciling" },
 ] as const;
 const DECISION = { allow: "Allowed", hold: "Held", block: "Blocked" } as const;
 
@@ -84,7 +85,7 @@ export default function Activity() {
       {error && <ErrorState error={error} onRetry={refresh} />}
       {!items && !error && <p className="muted" role="status">Loading…</p>}
 
-      {f.request && items && (record ? <Record a={record} agentName={nameOf(record.agentId)} /> : <p className="muted">No record with that id.</p>)}
+      {f.request && items && (record ? <Record a={record} agentName={nameOf(record.agentId)} onChange={refresh} /> : <p className="muted">No record with that id.</p>)}
 
       {!f.request && items && (
         <div className="table-wrap">
@@ -100,7 +101,7 @@ export default function Activity() {
                   <td className="nowrap">{allAgents && <span className="under">{nameOf(a.agentId)}</span>}<span className={`mono ${allAgents ? "muted small" : ""}`}>{a.taskId}</span></td>
                   <td className="detail"><span className="mono under" title={a.recipient}>{shortAddr(a.recipient)}</span><span className="muted small under">{a.reason}</span>{a.flags.length > 0 && <span className="warn-text small under">{a.flags.join(" ")}</span>}</td>
                   <td className="mono nowrap">{formatUsd(a.amountMicro)}</td>
-                  <td className="nowrap"><OutcomeBadge outcome={a.outcome} status={a.status} /><span className="muted small under">{DECISION[a.outcome]}{a.ruleId ? ` · ${humanize(a.ruleId)}` : ""}</span></td>
+                  <td className="nowrap"><OutcomeBadge outcome={a.outcome} status={a.status} settlement={a.settlement} /><span className="muted small under">{DECISION[a.outcome]}{a.ruleId ? ` · ${humanize(a.ruleId)}` : ""}</span></td>
                   <td><AnomalyTags anomalies={a.anomalies} /></td>
                   <td><ArcLinks a={a} /></td>
                 </tr>
@@ -126,7 +127,7 @@ function ArcLinks({ a }: { a: ActivityItem }) {
   );
 }
 
-function Record({ a, agentName }: { a: ActivityItem; agentName: string }) {
+function Record({ a, agentName, onChange }: { a: ActivityItem; agentName: string; onChange: () => Promise<void> }) {
   const rows: [string, ReactNode][] = [
     ["When", new Date(a.at).toLocaleString()],
     ["Agent", <>{agentName} <span className="mono muted">({a.agentId})</span></>],
@@ -136,7 +137,8 @@ function Record({ a, agentName }: { a: ActivityItem; agentName: string }) {
     ["Category", a.category],
     ["Agent's stated purpose", a.purpose || "—"],
     ["Decision", <>{DECISION[a.outcome]}{a.ruleId ? <span className="muted"> · rule {humanize(a.ruleId)}</span> : null}</>],
-    ["Status", <OutcomeBadge outcome={a.outcome} status={a.status} />],
+    ["Status", <OutcomeBadge outcome={a.outcome} status={a.status} settlement={a.settlement} />],
+    ...(a.settlement ? [["Money", <MoneyEvidence s={a.settlement} />] as [string, ReactNode]] : []),
     ["Why", a.reason],
     ["Request id", <span className="mono" style={{ overflowWrap: "anywhere" }}>{a.requestId}</span>],
   ];
@@ -161,9 +163,54 @@ function Record({ a, agentName }: { a: ActivityItem; agentName: string }) {
           </ul>
         )}
       </div>
+      {a.settlement?.needsReconciliation && <Reconcile a={a} onDone={onChange} />}
       {(a.arcTx || a.arcTxUrl || a.resolveTx || a.resolveTxUrl) && <p className="lockline">Verified on Arc: <ArcLinks a={a} /></p>}
       <div><Link className="btn secondary" href="/">Back to overview</Link></div>
     </section>
+  );
+}
+
+function MoneyEvidence({ s }: { s: NonNullable<ActivityItem["settlement"]> }) {
+  return (
+    <>
+      {s.label}
+      {s.reference && <span className="mono muted" style={{ overflowWrap: "anywhere" }}> · {s.verifiedOnchain ? "tx" : "reference (not verified)"} {s.reference}</span>}
+      {s.reconciledByOwner && <span className="muted"> · marked by you</span>}
+    </>
+  );
+}
+
+/**
+ * Owner resolves an uncertain outcome. The firewall can't tell whether money moved, so this asks the owner to check the
+ * payer's history first. "Not paid" returns the budget; "Paid" keeps it counted.
+ */
+function Reconcile({ a, onDone }: { a: ActivityItem; onDone: () => Promise<void> }) {
+  const [busy, setBusy] = useState(false);
+  const [msg, setMsg] = useState<string | null>(null);
+  async function mark(outcome: "paid" | "not_paid") {
+    setBusy(true);
+    setMsg(null);
+    try {
+      await api(`/v1/payments/${encodeURIComponent(a.requestId)}/reconcile`, { method: "POST", body: { outcome } });
+      await onDone();
+    } catch (e) {
+      setMsg(e instanceof Error ? e.message : "Couldn't update this payment.");
+    } finally {
+      setBusy(false);
+    }
+  }
+  return (
+    <div className="callout attention">
+      <div>
+        <strong>Did this payment go through?</strong>
+        <p className="muted">It failed after the payment started, so money may have moved. Check the payer&apos;s Gateway history (README &ldquo;Where to see the Agent Wallets&rdquo;) before you mark it. Until then it stays counted against budgets.</p>
+        {msg && <p role="alert">{msg}</p>}
+      </div>
+      <div className="toolbar">
+        <button className="btn secondary" disabled={busy} onClick={() => mark("paid")}>It was paid</button>
+        <button className="btn attention secondary" disabled={busy} onClick={() => mark("not_paid")}>It wasn&apos;t paid</button>
+      </div>
+    </div>
   );
 }
 
